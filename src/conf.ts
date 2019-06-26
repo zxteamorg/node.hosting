@@ -2,10 +2,6 @@ import * as zxteam from "@zxteam/contract";
 
 //import * as _ from "lodash";
 
-export interface Configuration {
-	readonly servers: ReadonlyArray<Configuration.WebServer>;
-}
-
 export namespace Configuration {
 	export type WebServer = UnsecuredWebServer | SecuredWebServer;
 
@@ -36,6 +32,14 @@ export namespace Configuration {
 		 */
 		serverKey: Buffer | string;
 		serverKeyPassword?: string;
+	}
+
+	export interface ServerEndpoint {
+		readonly servers: Array<string>;
+	}
+
+	export interface BindEndpoint extends ServerEndpoint {
+		readonly bindPath: string;
 	}
 
 	export function parseWebServer(configuration: zxteam.Configuration, serverName: string): WebServer {
@@ -96,12 +100,4 @@ export namespace Configuration {
 				throw new Error(`Wrong value for trustProxy: ${val}`);
 		}
 	}
-}
-
-export function configurationFactory(configuration: zxteam.Configuration): Configuration {
-	const servers: Array<Configuration.WebServer> = Configuration.parseWebServers(configuration);
-
-	const config: Configuration = Object.freeze({ servers });
-
-	return config;
 }

@@ -21,8 +21,8 @@ import * as express from "express";
 import * as fs from "fs";
 import * as http from "http";
 import * as https from "https";
-import { URL } from "url";
 import * as WebSocket from "ws";
+import * as _ from "lodash";
 
 import { Configuration } from "./conf";
 
@@ -62,8 +62,10 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 	public get expressApplication(): express.Application {
 		if (this._expressApplication === null) {
 			this._expressApplication = express();
-			if (this._opts.trustProxy !== undefined) {
-				this._expressApplication.set("trust proxy", this._opts.trustProxy);
+			const trustProxy = this._opts.trustProxy;
+			if (trustProxy !== undefined) {
+				this._log.debug("Setup 'trust proxy':", trustProxy);
+				this._expressApplication.set("trust proxy", trustProxy);
 			}
 		}
 		return this._expressApplication;
@@ -278,6 +280,154 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 		});
 	}
 }
+
+export interface ProtocolAdapter {
+	handleBinaryMessage(data: ArrayBuffer): zxteam.Task<ArrayBuffer>;
+	handleTextMessage(data: string): zxteam.Task<string>;
+}
+
+export type ProtocolAdapterFactory = () => Promise<ProtocolAdapter>;
+
+export abstract class ServerEndpoint extends Initable {
+	protected readonly _servers: ReadonlyArray<WebServer>;
+	protected readonly _log: zxteam.Logger;
+
+	public constructor(
+		servers: ReadonlyArray<WebServer>,
+		log: zxteam.Logger
+	) {
+		super();
+
+		this._servers = servers;
+		this._log = log;
+	}
+}
+
+export abstract class BindEndpoint extends ServerEndpoint {
+	protected readonly _bindPath: string;
+
+	public constructor(
+		servers: ReadonlyArray<WebServer>,
+		opts: Configuration.BindEndpoint,
+		log: zxteam.Logger
+	) {
+		super(servers, log);
+
+		this._bindPath = opts.bindPath;
+	}
+}
+
+export abstract class RestEndpoint<TService> extends BindEndpoint {
+	protected readonly _service: TService;
+
+	public constructor(
+		servers: ReadonlyArray<WebServer>,
+		service: TService,
+		opts: Configuration.BindEndpoint,
+		log: zxteam.Logger
+	) {
+		super(servers, opts, log);
+
+		this._service = service;
+	}
+}
+
+export class WebSocketEndpoint extends BindEndpoint {
+	private readonly _webSocketServers: Array<WebSocket.Server>;
+	private readonly _protocolAdapter: ProtocolAdapter;
+	private _connectionCounter: number;
+
+	public constructor(
+		servers: ReadonlyArray<WebServer>,
+		protocolAdapter: ProtocolAdapter,
+		opts: Configuration.BindEndpoint,
+		log: zxteam.Logger
+	) {
+		super(servers, opts, log);
+		this._webSocketServers = [];
+		this._protocolAdapter = protocolAdapter;
+		this._connectionCounter = 0;
+	}
+
+	protected onInit(): void {
+		for (const server of this._servers) {
+			const webSocketServer = server.createWebSocketServer(this._bindPath); // new WebSocket.Server({ noServer: true });
+			this._webSocketServers.push(webSocketServer);
+			webSocketServer.on("connection", this.onConnection.bind(this));
+		}
+	}
+
+	protected async onDispose() {
+		const webSocketServers = this._webSocketServers.splice(0).reverse();
+		for (const webSocketServer of webSocketServers) {
+			await new Promise((resolve) => {
+				webSocketServer.close((err) => {
+					if (err !== undefined) {
+						if (this._log.isWarnEnabled) {
+							this._log.warn(`Web Socket Server was closed with error. Inner message: ${err.message}`);
+						}
+						this._log.trace("Web Socket Server was closed with error.", err);
+					}
+
+					// dispose never raise any errors
+					resolve();
+				});
+			});
+		}
+	}
+
+	private get protocolAdapter(): ProtocolAdapter {
+		if (this._protocolAdapter !== null) {
+			return this._protocolAdapter;
+		}
+		throw new Error("Wrong state to use protocolAdapter. Did you call init()?");
+	}
+
+	protected onConnection(webSocket: WebSocket, request: http.IncomingMessage): void {
+		if (this._connectionCounter === Number.MAX_SAFE_INTEGER) { this._connectionCounter = 0; }
+		const connectionNumber: number = this._connectionCounter++;
+		const ipAddress = request.connection.remoteAddress;
+		if (ipAddress !== undefined && this._log.isTraceEnabled) {
+			this._log.trace(`Connection #${connectionNumber} established from ${ipAddress}`);
+		}
+		if (this._log.isInfoEnabled) {
+			this._log.info(`Connection #${connectionNumber} established`);
+		}
+		webSocket.binaryType = "arraybuffer";
+		webSocket.onmessage = ({ data }) => {
+			Promise.resolve().then(() => this.onMessage(webSocket, data))
+				.catch(e => {
+					if (this._log.isInfoEnabled) {
+						this._log.info(`Connection #${connectionNumber} onMessage failed: ${e.message}`);
+					}
+					if (this._log.isTraceEnabled) {
+						this._log.trace(`Connection #${connectionNumber} onMessage failed:`, e);
+					}
+				});
+		};
+		webSocket.onclose = ({ code, reason }) => {
+			if (this._log.isTraceEnabled) {
+				this._log.trace(`Connection #${connectionNumber} was closed: ${JSON.stringify({ code, reason })}`);
+			}
+			if (this._log.isInfoEnabled) {
+				this._log.info(`Connection #${connectionNumber} was closed`);
+			}
+		};
+	}
+
+	protected async onMessage(webSocket: WebSocket, data: WebSocket.Data): Promise<void> {
+		if (data instanceof ArrayBuffer) {
+			const response: ArrayBuffer = await this.protocolAdapter.handleBinaryMessage(data).promise;
+			webSocket.send(response);
+		} else if (_.isString(data)) {
+			const response: string = await this.protocolAdapter.handleTextMessage(data).promise;
+			webSocket.send(response);
+		} else {
+			throw new Error("Bad message");
+		}
+	}
+}
+
 
 export function instanceofWebServer(server: any): server is WebServer {
 	if (server instanceof UnsecuredWebServer) { return true; }
