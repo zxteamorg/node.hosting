@@ -211,10 +211,18 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 
 		// Make HTTPS server instance
 		const serverOpts: https.ServerOptions = {
-			ca: opts.caCertificate instanceof Buffer ? opts.caCertificate : fs.readFileSync(opts.caCertificate),
 			cert: opts.serverCertificate instanceof Buffer ? opts.serverCertificate : fs.readFileSync(opts.serverCertificate),
 			key: opts.serverKey instanceof Buffer ? opts.serverKey : fs.readFileSync(opts.serverKey)
 		};
+		if (opts.caCertificate !== undefined) {
+			if (opts.caCertificate instanceof Buffer) {
+				serverOpts.ca = opts.caCertificate;
+			} else if (_.isString(opts.caCertificate)) {
+				serverOpts.ca = fs.readFileSync(opts.caCertificate);
+			} else {
+				serverOpts.ca = opts.caCertificate;
+			}
+		}
 		if (opts.serverKeyPassword !== undefined) {
 			serverOpts.passphrase = opts.serverKeyPassword;
 		}

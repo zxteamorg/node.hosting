@@ -22,7 +22,7 @@ export namespace Configuration {
 		/**
 		 * Certificate's data as Buffer or Path to file
 		 */
-		caCertificate: Buffer | string;
+		caCertificate?: Buffer | string | Array<Buffer> | Array<string>;
 		/**
 		 * Certificate's data as Buffer or Path to file
 		 */
@@ -96,11 +96,13 @@ export namespace Configuration {
 					name: serverName,
 					listenHost: configuration.getString("listenHost"),
 					listenPort: configuration.getInt("listenPort"),
-					caCertificate: configuration.getString("caCertificate"),
 					serverCertificate: configuration.getString("serverCertificate"),
 					serverKey: configuration.getString("serverKey"),
 					clientCertificateMode: clientCertMode
 				};
+				if (configuration.hasKey("caCertificate")) {
+					serverOpts.caCertificate = configuration.getString("caCertificate");
+				}
 				if (configuration.hasKey("serverKeyPassword")) {
 					serverOpts.serverKeyPassword = configuration.getString("serverKeyPassword");
 				}
