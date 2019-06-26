@@ -1,6 +1,6 @@
 {
 	"name": "@zxteam/webserver",
-	"version": "5.0.3",
+	"version": "5.0.4",
 	"description": "ZXTeam's WebServer (http.Server/https.Server wrapper)",
 	"main": "./src/index.js",
 	"types": "./src/index.d.ts",

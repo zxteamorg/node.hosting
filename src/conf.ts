@@ -32,6 +32,29 @@ export namespace Configuration {
 		 */
 		serverKey: Buffer | string;
 		serverKeyPassword?: string;
+		clientCertificateMode: SecuredWebServer.ClientCertificateMode;
+	}
+
+	export namespace SecuredWebServer {
+		export const enum ClientCertificateMode {
+			/**
+			 * the server will NOT request a certificate from clients that connect
+			 * { requestCert: false, rejectUnauthorized: false }
+			 */
+			NONE = "none",
+
+			/**
+			 * the server WILL request a certificate from clients that connect
+			 * { requestCert: true, rejectUnauthorized: false }
+			 */
+			REQUEST = "request",
+
+			/**
+			 * the server WILL request a certificate from clients that connect and attempt to verify that certificate
+			 * { requestCert: true, rejectUnauthorized: true }
+			 */
+			TRUST = "trust"
+		}
 	}
 
 	export interface ServerEndpoint {
@@ -58,6 +81,16 @@ export namespace Configuration {
 				return serverOpts;
 			}
 			case "https": {
+				const clientCertMode = configuration.getString("clientCertificateMode");
+				switch (clientCertMode) {
+					case SecuredWebServer.ClientCertificateMode.NONE:
+					case SecuredWebServer.ClientCertificateMode.REQUEST:
+					case SecuredWebServer.ClientCertificateMode.TRUST:
+						break;
+					default:
+						throw new Error(`Unsupported value for clientCertMode: ${clientCertMode}`);
+				}
+
 				const serverOpts: SecuredWebServer = {
 					type: serverType,
 					name: serverName,
@@ -65,7 +98,8 @@ export namespace Configuration {
 					listenPort: configuration.getInt("listenPort"),
 					caCertificate: configuration.getString("caCertificate"),
 					serverCertificate: configuration.getString("serverCertificate"),
-					serverKey: configuration.getString("serverKey")
+					serverKey: configuration.getString("serverKey"),
+					clientCertificateMode: clientCertMode
 				};
 				if (configuration.hasKey("serverKeyPassword")) {
 					serverOpts.serverKeyPassword = configuration.getString("serverKeyPassword");

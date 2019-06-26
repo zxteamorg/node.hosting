@@ -219,12 +219,20 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 			serverOpts.passphrase = opts.serverKeyPassword;
 		}
 
-		serverOpts.requestCert = true;
-		serverOpts.rejectUnauthorized = true;
-
-		if (process.env.NODE_ENV === "development" && process.env.COINGET_ALLOW_UNLICENSED_CALLS === "YES") {
-			serverOpts.requestCert = false;
-			serverOpts.rejectUnauthorized = false;
+		switch (opts.clientCertificateMode) {
+			case Configuration.SecuredWebServer.ClientCertificateMode.NONE:
+				serverOpts.requestCert = false;
+				serverOpts.rejectUnauthorized = false;
+				break;
+			case Configuration.SecuredWebServer.ClientCertificateMode.REQUEST:
+				serverOpts.requestCert = true;
+				serverOpts.rejectUnauthorized = false;
+				break;
+			default:
+				// By default maximun security Configuration.SecuredWebServer.ClientCertMode.TRUST
+				serverOpts.requestCert = true;
+				serverOpts.rejectUnauthorized = true;
+				break;
 		}
 
 		this._httpsServer = https.createServer(serverOpts, this.onRequest.bind(this));
@@ -281,9 +289,12 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 	}
 }
 
+export interface ProtocolAdapterNext<T> {
+	(): zxteam.Task<T>;
+}
 export interface ProtocolAdapter {
-	handleBinaryMessage(data: ArrayBuffer): zxteam.Task<ArrayBuffer>;
-	handleTextMessage(data: string): zxteam.Task<string>;
+	handleBinaryMessage(data: ArrayBuffer, next?: ProtocolAdapterNext<ArrayBuffer>): zxteam.Task<ArrayBuffer>;
+	handleTextMessage(data: string, next?: ProtocolAdapterNext<string>): zxteam.Task<string>;
 }
 
 export type ProtocolAdapterFactory = () => Promise<ProtocolAdapter>;
@@ -332,21 +343,28 @@ export abstract class RestEndpoint<TService> extends BindEndpoint {
 	}
 }
 
-export class WebSocketEndpoint extends BindEndpoint {
+export interface WebSocketBinderEndpoint {
+	use(protocolAdapter: ProtocolAdapter): void;
+}
+
+export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
-	private readonly _protocolAdapter: ProtocolAdapter;
+	private readonly _protocolAdapters: Array<ProtocolAdapter>;
 	private _connectionCounter: number;
 
 	public constructor(
 		servers: ReadonlyArray<WebServer>,
-		protocolAdapter: ProtocolAdapter,
 		opts: Configuration.BindEndpoint,
 		log: zxteam.Logger
 	) {
 		super(servers, opts, log);
 		this._webSocketServers = [];
-		this._protocolAdapter = protocolAdapter;
+		this._protocolAdapters = [];
 		this._connectionCounter = 0;
+	}
+
+	public use(protocolAdapter: ProtocolAdapter): void {
+		this._protocolAdapters.push(protocolAdapter);
 	}
 
 	protected onInit(): void {
@@ -374,13 +392,6 @@ export class WebSocketEndpoint extends BindEndpoint {
 				});
 			});
 		}
-	}
-
-	private get protocolAdapter(): ProtocolAdapter {
-		if (this._protocolAdapter !== null) {
-			return this._protocolAdapter;
-		}
-		throw new Error("Wrong state to use protocolAdapter. Did you call init()?");
 	}
 
 	protected onConnection(webSocket: WebSocket, request: http.IncomingMessage): void {
@@ -416,15 +427,44 @@ export class WebSocketEndpoint extends BindEndpoint {
 	}
 
 	protected async onMessage(webSocket: WebSocket, data: WebSocket.Data): Promise<void> {
+		const protocolAdapters = this._protocolAdapters.slice(0);
+		if (protocolAdapters.length === 0) {
+			this._log.warn("Message received but no any protocol adapters to handle it.");
+			return;
+		}
+		let nextProtocolAdapter: ProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
 		if (data instanceof ArrayBuffer) {
-			const response: ArrayBuffer = await this.protocolAdapter.handleBinaryMessage(data).promise;
+			const next: ProtocolAdapterNext<ArrayBuffer> = () => {
+				const currentProtocolAdapter = nextProtocolAdapter;
+				let nextFunc;
+				if (protocolAdapters.length > 0) {
+					nextFunc = next;
+					nextProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
+				} else {
+					nextFunc = undefined;
+				}
+				return currentProtocolAdapter.handleBinaryMessage(data, nextFunc);
+			};
+			const response = await next().promise;
 			webSocket.send(response);
 		} else if (_.isString(data)) {
-			const response: string = await this.protocolAdapter.handleTextMessage(data).promise;
+			const next: ProtocolAdapterNext<string> = () => {
+				const currentProtocolAdapter = nextProtocolAdapter;
+				let nextFunc;
+				if (protocolAdapters.length > 0) {
+					nextFunc = next;
+					nextProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
+				} else {
+					nextFunc = undefined;
+				}
+				return currentProtocolAdapter.handleTextMessage(data, nextFunc);
+			};
+			const response = await next().promise;
 			webSocket.send(response);
 		} else {
 			throw new Error("Bad message");
 		}
+
 	}
 }
 
@@ -432,6 +472,20 @@ export class WebSocketEndpoint extends BindEndpoint {
 export function instanceofWebServer(server: any): server is WebServer {
 	if (server instanceof UnsecuredWebServer) { return true; }
 	if (server instanceof SecuredWebServer) { return true; }
+
+	if (
+		process.env.NODE_ENV === "development" &&
+		"name" in server &&
+		"underlayingServer" in server &&
+		"expressApplication" in server &&
+		"requestHandler" in server &&
+		"createWebSocketServer" in server &&
+		"listen" in server
+	) {
+		// Look like the server is WebServer like. Allow it only in development
+		return true;
+	}
+
 	return false;
 }
 
