@@ -1,6 +1,6 @@
 {
 	"name": "@zxteam/webserver",
-	"version": "5.0.5",
+	"version": "5.0.10",
 	"description": "ZXTeam's WebServer (http.Server/https.Server wrapper)",
 	"main": "./src/index.js",
 	"types": "./src/index.d.ts",
@@ -29,7 +29,7 @@
 		"@zxnode/build": "^0.0.34"
 	},
 	"dependencies": {
-		"@zxteam/contract": "^5.0.1",
+		"@zxteam/contract": "^5.0.9",
 		"@zxteam/disposable": "^5.0.2",
 		"express": "^4.17.1",
 		"lodash": "^4.17.11",

@@ -73,7 +73,7 @@ export namespace Configuration {
 					type: serverType,
 					name: serverName,
 					listenHost: configuration.getString("listenHost"),
-					listenPort: configuration.getInt("listenPort")
+					listenPort: configuration.getInteger("listenPort")
 				};
 				if (configuration.hasKey("trustProxy")) {
 					serverOpts.trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
@@ -95,7 +95,7 @@ export namespace Configuration {
 					type: serverType,
 					name: serverName,
 					listenHost: configuration.getString("listenHost"),
-					listenPort: configuration.getInt("listenPort"),
+					listenPort: configuration.getInteger("listenPort"),
 					serverCertificate: configuration.getString("serverCertificate"),
 					serverKey: configuration.getString("serverKey"),
 					clientCertificateMode: clientCertMode

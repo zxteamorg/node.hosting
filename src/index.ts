@@ -21,6 +21,7 @@ import * as express from "express";
 import * as fs from "fs";
 import * as http from "http";
 import * as https from "https";
+import { parse as parseURL } from "url";
 import * as WebSocket from "ws";
 import * as _ from "lodash";
 
@@ -33,8 +34,8 @@ export type WebServerRequestHandler = (req: http.IncomingMessage, res: http.Serv
 export interface WebServer extends zxteam.Disposable {
 	readonly name: string;
 	readonly underlayingServer: http.Server | https.Server;
-	expressApplication: express.Application;
-	requestHandler: WebServerRequestHandler;
+	rootExpressApplication: express.Application;
+	bindRequestHandler(bindPath: string, handler: WebServerRequestHandler): void;
 	createWebSocketServer(bindPath: string): WebSocket.Server;
 	listen(): Promise<void>;
 }
@@ -44,41 +45,48 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 	protected readonly _log: zxteam.Logger;
 	protected readonly _opts: TOpts;
 	protected readonly _websockets: { [bindPath: string]: WebSocket.Server };
-	private _handler: WebServerRequestHandler | null;
-	private _expressApplication: express.Application | null;
+	private readonly _handlers: Map</*bindPath: */string, WebServerRequestHandler>;
+	private _rootExpressApplication: express.Application | null;
 
 	public constructor(opts: TOpts, log: zxteam.Logger) {
 		super();
 		this._opts = opts;
 		this._log = log;
 		this._websockets = {};
-		this._handler = null;
-		this._expressApplication = null;
+		this._handlers = new Map();
+		this._rootExpressApplication = null;
 	}
 
 	/**
 	 * Lazy create for Express Application
 	 */
-	public get expressApplication(): express.Application {
-		if (this._expressApplication === null) {
-			this._expressApplication = express();
+	public get rootExpressApplication(): express.Application {
+		if (this._rootExpressApplication === null) {
+			this._rootExpressApplication = express();
 			const trustProxy = this._opts.trustProxy;
 			if (trustProxy !== undefined) {
 				this._log.debug("Setup 'trust proxy':", trustProxy);
-				this._expressApplication.set("trust proxy", trustProxy);
+				this._rootExpressApplication.set("trust proxy", trustProxy);
 			}
 		}
-		return this._expressApplication;
+		return this._rootExpressApplication;
 	}
 
-	public set expressApplication(value: express.Application) {
-		if (this._expressApplication !== null) {
+	public set rootExpressApplication(value: express.Application) {
+		if (this._rootExpressApplication !== null) {
 			throw new Error("Wrong operation at current state. Express application already set. Override is not allowed.");
 		}
-		this._expressApplication = value;
+		this._rootExpressApplication = value;
 	}
 
 	public get name(): string { return this._opts.name; }
+
+	public bindRequestHandler(bindPath: string, value: WebServerRequestHandler): void {
+		if (this._handlers.has(bindPath)) {
+			throw new Error(`Wrong operation. Path '${bindPath}' already binded`);
+		}
+		this._handlers.set(bindPath, value);
+	}
 
 	public createWebSocketServer(bindPath: string): WebSocket.Server {
 		const websocketServer: WebSocket.Server = new WebSocket.Server({ noServer: true });
@@ -103,32 +111,25 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 		return this.onListen();
 	}
 
-	public get requestHandler(): WebServerRequestHandler {
-		if (this._handler === null) {
-			throw new Error("Wrong operation at current state. Request handler is not set yet.");
-		}
-		return this._handler;
-	}
-
-	public set requestHandler(value: WebServerRequestHandler) {
-		if (this._handler !== null) {
-			throw new Error("Wrong operation at current state. Request handler already set. Override is not allowed.");
-		}
-		this._handler = value;
-	}
-
 	protected abstract onListen(): Promise<void>;
 
 	protected onRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-		if (this._handler !== null) {
-			if (this._handler(req, res)) {
-				// The request was processed by a handler
-				return;
+		if (this._handlers.size > 0 && req.url !== undefined) {
+			const { pathname } = parseURL(req.url);
+			if (pathname !== undefined) {
+				for (const bindPath of this._handlers.keys()) {
+					if (pathname.startsWith(bindPath)) {
+						const handler = this._handlers.get(bindPath) as WebServerRequestHandler;
+						handler(req, res);
+						return;
+					}
+				}
 			}
 		}
 
-		if (this._expressApplication !== null) {
-			this._expressApplication(req, res);
+		// A proper handler was not found, fallback to rootExpressApplication
+		if (this._rootExpressApplication !== null) {
+			this._rootExpressApplication(req, res);
 			return;
 		}
 
