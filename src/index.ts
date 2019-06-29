@@ -486,8 +486,8 @@ export function instanceofWebServer(server: any): server is WebServer {
 		process.env.NODE_ENV === "development" &&
 		"name" in server &&
 		"underlayingServer" in server &&
-		"expressApplication" in server &&
-		"requestHandler" in server &&
+		"rootExpressApplication" in server &&
+		"bindRequestHandler" in server &&
 		"createWebSocketServer" in server &&
 		"listen" in server
 	) {
