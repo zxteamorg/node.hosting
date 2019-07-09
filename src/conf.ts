@@ -38,22 +38,28 @@ export namespace Configuration {
 	export namespace SecuredWebServer {
 		export const enum ClientCertificateMode {
 			/**
-			 * the server will NOT request a certificate from clients that connect
-			 * { requestCert: false, rejectUnauthorized: false }
+			 * The server will NOT request a certificate from clients that connect WILL NOT validate the certificate.
 			 */
 			NONE = "none",
 
 			/**
-			 * the server WILL request a certificate from clients that connect
-			 * { requestCert: true, rejectUnauthorized: false }
+			 * The server WILL request a certificate from clients that connect and WILL NOT validate the certificate.
+			 * Validate the certificate by yourself.
 			 */
 			REQUEST = "request",
 
 			/**
-			 * the server WILL request a certificate from clients that connect and attempt to verify that certificate
-			 * { requestCert: true, rejectUnauthorized: true }
+			 * The server WILL request a certificate from clients that connect and validate the certificate
+			 * Rejects untrusted certificate
 			 */
-			TRUST = "trust"
+			TRUST = "trust",
+
+			/**
+			 * The server WILL retreive a certificate from the HTTP header X-Forwarded-Client-Cert and validate the certificate.
+			 * Rejects untrusted certificate
+			 * Hist: Use $ssl_client_escaped_cert NGINX variable to set X-Forwarded-Client-Cert header inside configuration.
+			 */
+			XFCC = "xfcc"
 		}
 	}
 
@@ -81,11 +87,12 @@ export namespace Configuration {
 				return serverOpts;
 			}
 			case "https": {
-				const clientCertMode = configuration.getString("clientCertificateMode");
+				const clientCertMode: string = configuration.getString("clientCertificateMode");
 				switch (clientCertMode) {
 					case SecuredWebServer.ClientCertificateMode.NONE:
 					case SecuredWebServer.ClientCertificateMode.REQUEST:
 					case SecuredWebServer.ClientCertificateMode.TRUST:
+					case SecuredWebServer.ClientCertificateMode.XFCC:
 						break;
 					default:
 						throw new Error(`Unsupported value for clientCertMode: ${clientCertMode}`);

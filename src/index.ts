@@ -228,23 +228,32 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 			serverOpts.passphrase = opts.serverKeyPassword;
 		}
 
+		let onRequest: http.RequestListener;
 		switch (opts.clientCertificateMode) {
 			case Configuration.SecuredWebServer.ClientCertificateMode.NONE:
 				serverOpts.requestCert = false;
 				serverOpts.rejectUnauthorized = false;
+				onRequest = this.onRequest.bind(this);
 				break;
 			case Configuration.SecuredWebServer.ClientCertificateMode.REQUEST:
 				serverOpts.requestCert = true;
 				serverOpts.rejectUnauthorized = false;
+				onRequest = this.onRequest.bind(this);
+				break;
+			case Configuration.SecuredWebServer.ClientCertificateMode.XFCC:
+				serverOpts.requestCert = false;
+				serverOpts.rejectUnauthorized = false;
+				onRequest = this.onXfccRequest.bind(this);
 				break;
 			default:
-				// By default maximun security Configuration.SecuredWebServer.ClientCertMode.TRUST
+				// By default use Configuration.SecuredWebServer.ClientCertMode.TRUST mode
 				serverOpts.requestCert = true;
 				serverOpts.rejectUnauthorized = true;
+				onRequest = this.onRequest.bind(this);
 				break;
 		}
 
-		this._httpsServer = https.createServer(serverOpts, this.onRequest.bind(this));
+		this._httpsServer = https.createServer(serverOpts, onRequest);
 	}
 
 	public get underlayingServer(): https.Server { return this._httpsServer; }
@@ -295,6 +304,23 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 				destroyResolve();
 			});
 		});
+	}
+
+	private onXfccRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+		// TODO
+		const xfccHeaderData = req && req.headers && req.headers["x-forwarded-client-cert"];
+		if (_.isString(xfccHeaderData)) {
+			this._log.warn("Received Client Certificate:", xfccHeaderData);
+			this.onRequest(req, res);
+			return;
+		} else {
+			this._log.debug("Request with no X-Forwarded-Client-Cert header.");
+		}
+
+		res.setHeader("WWW-Authenticate", "Basic realm=\"SSL Client Certificate\"");
+		res.writeHead(401);
+		res.statusMessage = "Unauthorized";
+		res.end();
 	}
 }
 
