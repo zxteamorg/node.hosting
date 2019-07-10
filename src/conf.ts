@@ -4,84 +4,78 @@ export namespace Configuration {
 	export type WebServer = UnsecuredWebServer | SecuredWebServer;
 
 	export interface WebServerBase {
-		name: string;
-		listenHost: string;
-		listenPort: number;
+		readonly name: string;
+		readonly listenHost: string;
+		readonly listenPort: number;
 		/**
 		 * See http://expressjs.com/en/4x/api.html#trust.proxy.options.table
 		 */
-		trustProxy?: boolean | "loopback" | "linklocal" | "uniquelocal";
+		readonly trustProxy?: boolean | "loopback" | "linklocal" | "uniquelocal";
 	}
 
 	export interface UnsecuredBaseWebServer extends WebServerBase {
-		type: "http";
+		readonly type: "http";
 	}
 	export interface UnsecuredCommonWebServer extends UnsecuredBaseWebServer {
 	}
 	export interface UnsecuredXfccWebServer extends UnsecuredBaseWebServer {
-		caCertificates: Buffer | string | Array<string | Buffer>;
-		clientCertificateMode: SecuredWebServer.ClientCertificateMode.XFCC;
+		readonly caCertificates: Buffer | string | Array<string | Buffer>;
+		readonly clientCertificateMode: ClientCertificateMode.XFCC;
 	}
 	export type UnsecuredWebServer = UnsecuredCommonWebServer | UnsecuredXfccWebServer;
 
 	export interface SecuredBaseWebServer extends WebServerBase {
-		type: "https";
+		readonly type: "https";
 		/**
 		 * Certificate's data as Buffer or Path to file
 		 */
-		serverCertificate: Buffer | string;
+		readonly serverCertificate: Buffer | string;
 		/**
 		 * Private Key's data as Buffer or Path to file
 		 */
-		serverKey: Buffer | string;
-		serverKeyPassword?: string;
+		readonly serverKey: Buffer | string;
+		readonly serverKeyPassword?: string;
 	}
 	export interface SecuredCommonWebServer extends SecuredBaseWebServer {
 		/**
 		 * Certificate's data as Buffer or Path to file
 		 */
-		caCertificates?: Buffer | string | Array<string | Buffer>;
-		clientCertificateMode:
-		SecuredWebServer.ClientCertificateMode.REQUEST |
-		SecuredWebServer.ClientCertificateMode.NONE;
+		readonly caCertificates?: Buffer | string | Array<string | Buffer>;
+		readonly clientCertificateMode: ClientCertificateMode.REQUEST | ClientCertificateMode.NONE;
 	}
 	export interface SecuredClientWebServer extends SecuredBaseWebServer {
 		/**
 		 * Certificate's data as Buffer or Path to file
 		 */
-		caCertificates: Buffer | string | Array<string | Buffer>;
-		clientCertificateMode:
-		SecuredWebServer.ClientCertificateMode.TRUST |
-		SecuredWebServer.ClientCertificateMode.XFCC;
+		readonly caCertificates: Buffer | string | Array<string | Buffer>;
+		readonly clientCertificateMode: ClientCertificateMode.TRUST | ClientCertificateMode.XFCC;
 	}
 	export type SecuredWebServer = SecuredCommonWebServer | SecuredClientWebServer;
 
-	export namespace SecuredWebServer {
-		export const enum ClientCertificateMode {
-			/**
-			 * The server will NOT request a certificate from clients that connect WILL NOT validate the certificate.
-			 */
-			NONE = "none",
+	export const enum ClientCertificateMode {
+		/**
+		 * The server will NOT request a certificate from clients that connect WILL NOT validate the certificate.
+		 */
+		NONE = "none",
 
-			/**
-			 * The server WILL request a certificate from clients that connect and WILL NOT validate the certificate.
-			 * Validate the certificate by yourself.
-			 */
-			REQUEST = "request",
+		/**
+		 * The server WILL request a certificate from clients that connect and WILL NOT validate the certificate.
+		 * Validate the certificate by yourself.
+		 */
+		REQUEST = "request",
 
-			/**
-			 * The server WILL request a certificate from clients that connect and validate the certificate
-			 * Rejects untrusted certificate
-			 */
-			TRUST = "trust",
+		/**
+		 * The server WILL request a certificate from clients that connect and validate the certificate
+		 * Rejects untrusted certificate
+		 */
+		TRUST = "trust",
 
-			/**
-			 * The server WILL retreive a certificate from the HTTP header X-Forwarded-Client-Cert and validate the certificate.
-			 * Rejects untrusted certificate
-			 * Hist: Use $ssl_client_escaped_cert NGINX variable to set X-Forwarded-Client-Cert header inside configuration.
-			 */
-			XFCC = "xfcc"
-		}
+		/**
+		 * The server WILL retreive a certificate from the HTTP header X-Forwarded-Client-Cert and validate the certificate.
+		 * Rejects untrusted certificate
+		 * Hist: Use $ssl_client_escaped_cert NGINX variable to set X-Forwarded-Client-Cert header inside configuration.
+		 */
+		XFCC = "xfcc"
 	}
 
 	export interface ServerEndpoint {
@@ -96,60 +90,110 @@ export namespace Configuration {
 		const serverType = configuration.getString("type");
 		switch (serverType) {
 			case "http": {
-				const serverOpts: UnsecuredWebServer = {
-					type: serverType,
-					name: serverName,
-					listenHost: configuration.getString("listenHost"),
-					listenPort: configuration.getInteger("listenPort")
-				};
-				if (configuration.hasKey("trustProxy")) {
-					serverOpts.trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
+
+				if (configuration.hasKey("clientCertificateMode")) {
+					const clientCertificateMode = configuration.getString("clientCertificateMode");
+					if (clientCertificateMode !== Configuration.ClientCertificateMode.XFCC) {
+						throw new Error(`Unsupported value for clientCertificateMode: ${clientCertificateMode}`);
+					}
+
+					let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
+					if (configuration.hasKey("trustProxy")) {
+						trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
+					}
+
+					const serverOpts: UnsecuredXfccWebServer = {
+						type: serverType,
+						name: serverName,
+						listenHost: configuration.getString("listenHost"),
+						listenPort: configuration.getInteger("listenPort"),
+						trustProxy,
+						clientCertificateMode,
+						caCertificates: configuration.getString("caCertificates")
+					};
+
+					return serverOpts;
+				} else {
+					let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
+					if (configuration.hasKey("trustProxy")) {
+						trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
+					}
+
+					const serverOpts: UnsecuredCommonWebServer = {
+						type: serverType,
+						name: serverName,
+						listenHost: configuration.getString("listenHost"),
+						listenPort: configuration.getInteger("listenPort"),
+						trustProxy
+					};
+
+					return serverOpts;
 				}
-				return serverOpts;
 			}
 			case "https": {
 				let serverOpts: SecuredWebServer;
 
+				let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
+				if (configuration.hasKey("trustProxy")) {
+					trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
+				}
+
+				let serverKeyPassword: string | undefined = undefined;
+				if (configuration.hasKey("serverKeyPassword")) {
+					serverKeyPassword = configuration.getString("serverKeyPassword");
+				}
+
+
 				const clientCertMode: string = configuration.getString("clientCertificateMode");
 				switch (clientCertMode) {
-					case SecuredWebServer.ClientCertificateMode.NONE:
-					case SecuredWebServer.ClientCertificateMode.REQUEST:
-						serverOpts = {
-							type: serverType,
-							name: serverName,
-							listenHost: configuration.getString("listenHost"),
-							listenPort: configuration.getInteger("listenPort"),
-							serverCertificate: configuration.getString("serverCertificate"),
-							serverKey: configuration.getString("serverKey"),
-							clientCertificateMode: clientCertMode
-						};
-						if (configuration.hasKey("caCertificate")) {
-							serverOpts.caCertificates = configuration.getString("caCertificate");
+					case ClientCertificateMode.NONE:
+					case ClientCertificateMode.REQUEST:
+						if (configuration.hasKey("caCertificates")) {
+							serverOpts = {
+								type: serverType,
+								name: serverName,
+								listenHost: configuration.getString("listenHost"),
+								listenPort: configuration.getInteger("listenPort"),
+								serverCertificate: configuration.getString("serverCertificate"),
+								serverKey: configuration.getString("serverKey"),
+								serverKeyPassword,
+								trustProxy,
+								clientCertificateMode: clientCertMode,
+								caCertificates: configuration.getString("caCertificates")
+							};
+						} else {
+							serverOpts = {
+								type: serverType,
+								name: serverName,
+								listenHost: configuration.getString("listenHost"),
+								listenPort: configuration.getInteger("listenPort"),
+								serverCertificate: configuration.getString("serverCertificate"),
+								serverKey: configuration.getString("serverKey"),
+								serverKeyPassword,
+								trustProxy,
+								clientCertificateMode: clientCertMode
+							};
 						}
 						break;
-					case SecuredWebServer.ClientCertificateMode.TRUST:
-					case SecuredWebServer.ClientCertificateMode.XFCC:
+					case ClientCertificateMode.TRUST:
+					case ClientCertificateMode.XFCC:
 						serverOpts = {
 							type: serverType,
 							name: serverName,
 							listenHost: configuration.getString("listenHost"),
 							listenPort: configuration.getInteger("listenPort"),
-							caCertificates: configuration.getString("caCertificate"),
+							caCertificates: configuration.getString("caCertificates"),
 							serverCertificate: configuration.getString("serverCertificate"),
 							serverKey: configuration.getString("serverKey"),
+							serverKeyPassword,
+							trustProxy,
 							clientCertificateMode: clientCertMode
 						};
 						break;
 					default:
-						throw new Error(`Unsupported value for clientCertMode: ${clientCertMode}`);
+						throw new Error(`Unsupported value for clientCertificateMode: ${clientCertMode}`);
 				}
 
-				if (configuration.hasKey("serverKeyPassword")) {
-					serverOpts.serverKeyPassword = configuration.getString("serverKeyPassword");
-				}
-				if (configuration.hasKey("trustProxy")) {
-					serverOpts.trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
-				}
 				return serverOpts;
 			}
 			default:

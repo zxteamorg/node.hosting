@@ -174,8 +174,8 @@ async function main() {
 
 	server1 = new THE.SecuredWebServer({
 		caCertificates: [Buffer.from(caCertificate1), Buffer.from(caCertificate2)],
-		clientCertificateMode: THE.Configuration.SecuredWebServer.ClientCertificateMode.XFCC,
-		//clientCertificateMode: THE.Configuration.SecuredWebServer.ClientCertificateMode.REQUEST,
+		clientCertificateMode: THE.Configuration.ClientCertificateMode.XFCC,
+		//clientCertificateMode: THE.Configuration.ClientCertificateMode.REQUEST,
 		serverCertificate: Buffer.from(serverCertificate),
 		serverKey: Buffer.from(masterKey),
 		type: "https",
@@ -186,7 +186,7 @@ async function main() {
 
 	server2 = new THE.UnsecuredWebServer({
 		caCertificates: [Buffer.from(caCertificate1), Buffer.from(caCertificate2)],
-		clientCertificateMode: THE.Configuration.SecuredWebServer.ClientCertificateMode.XFCC,
+		clientCertificateMode: THE.Configuration.ClientCertificateMode.XFCC,
 		type: "http",
 		listenHost: "0.0.0.0",
 		listenPort: 8440,

@@ -71,7 +71,7 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 			if (friendlyOpts.type === "http") {
 				if (
 					"clientCertificateMode" in friendlyOpts
-					&& friendlyOpts.clientCertificateMode === Configuration.SecuredWebServer.ClientCertificateMode.XFCC
+					&& friendlyOpts.clientCertificateMode === Configuration.ClientCertificateMode.XFCC
 				) {
 					if (
 						friendlyOpts.caCertificates !== undefined &&
@@ -650,25 +650,25 @@ export function createWebServers(
 
 
 namespace helper {
-	function parseCertificate(caCertificate: Buffer | string): [pki.Certificate, Buffer] {
+	function parseCertificate(certificate: Buffer | string): [pki.Certificate, Buffer] {
 		let cert: pki.Certificate;
 		let data: Buffer;
 
-		if (_.isString(caCertificate)) {
-			data = fs.readFileSync(caCertificate);
+		if (_.isString(certificate)) {
+			data = fs.readFileSync(certificate);
 			cert = pki.certificateFromPem(data.toString("ascii"));
 		} else {
-			data = caCertificate;
-			cert = pki.certificateFromPem(caCertificate.toString("ascii"));
+			data = certificate;
+			cert = pki.certificateFromPem(certificate.toString("ascii"));
 		}
 
 		return [cert, data];
 	}
-	export function parseCertificates(caCertificates: Buffer | string | Array<string | Buffer>): Array<[pki.Certificate, Buffer]> {
-		if (caCertificates instanceof Buffer || _.isString(caCertificates)) {
-			return [parseCertificate(caCertificates)];
+	export function parseCertificates(certificates: Buffer | string | Array<string | Buffer>): Array<[pki.Certificate, Buffer]> {
+		if (certificates instanceof Buffer || _.isString(certificates)) {
+			return [parseCertificate(certificates)];
 		} else {
-			return caCertificates.map(parseCertificate);
+			return certificates.map(parseCertificate);
 		}
 	}
 
