@@ -585,7 +585,7 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 				}
 				return currentProtocolAdapter.handleBinaryMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
+			const response = await next(helper.DUMMY_CANCELLATION_TOKEN, data).promise;
 			webSocket.send(response);
 		} else if (_.isString(data)) {
 			const next: ProtocolAdapterNext<string> = (cancellationToken: zxteam.CancellationToken, nextData: string) => {
@@ -599,7 +599,7 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 				}
 				return currentProtocolAdapter.handleTextMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
+			const response = await next(helper.DUMMY_CANCELLATION_TOKEN, data).promise;
 			webSocket.send(response);
 		} else {
 			throw new Error("Bad message");
