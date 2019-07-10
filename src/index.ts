@@ -309,6 +309,7 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 	private onXfccRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
 		// TODO
 		const xfccHeaderData = req && req.headers && req.headers["x-forwarded-client-cert"];
+		this._log.info("onXfccRequest", req, req.headers);
 		if (_.isString(xfccHeaderData)) {
 			this._log.warn("Received Client Certificate:", xfccHeaderData);
 			this.onRequest(req, res);
@@ -317,9 +318,8 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 			this._log.debug("Request with no X-Forwarded-Client-Cert header.");
 		}
 
-		res.setHeader("WWW-Authenticate", "Basic realm=\"SSL Client Certificate\"");
 		res.writeHead(401);
-		res.statusMessage = "Unauthorized";
+		res.statusMessage = "Unauthorized. Client Certificate is required.";
 		res.end();
 	}
 }
