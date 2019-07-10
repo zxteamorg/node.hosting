@@ -20,3 +20,6 @@ src/**/*.map
 test/**/*.d.ts
 test/**/*.js
 test/**/*.map
+
+# Dev files
+temp/

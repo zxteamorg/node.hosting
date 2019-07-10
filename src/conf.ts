@@ -1,7 +1,5 @@
 import * as zxteam from "@zxteam/contract";
 
-//import * as _ from "lodash";
-
 export namespace Configuration {
 	export type WebServer = UnsecuredWebServer | SecuredWebServer;
 
@@ -14,15 +12,20 @@ export namespace Configuration {
 		 */
 		trustProxy?: boolean | "loopback" | "linklocal" | "uniquelocal";
 	}
-	export interface UnsecuredWebServer extends WebServerBase {
+
+	export interface UnsecuredBaseWebServer extends WebServerBase {
 		type: "http";
 	}
-	export interface SecuredWebServer extends WebServerBase {
+	export interface UnsecuredCommonWebServer extends UnsecuredBaseWebServer {
+	}
+	export interface UnsecuredXfccWebServer extends UnsecuredBaseWebServer {
+		caCertificates: Buffer | string | Array<string | Buffer>;
+		clientCertificateMode: SecuredWebServer.ClientCertificateMode.XFCC;
+	}
+	export type UnsecuredWebServer = UnsecuredCommonWebServer | UnsecuredXfccWebServer;
+
+	export interface SecuredBaseWebServer extends WebServerBase {
 		type: "https";
-		/**
-		 * Certificate's data as Buffer or Path to file
-		 */
-		caCertificate?: Buffer | string | Array<Buffer> | Array<string>;
 		/**
 		 * Certificate's data as Buffer or Path to file
 		 */
@@ -32,8 +35,26 @@ export namespace Configuration {
 		 */
 		serverKey: Buffer | string;
 		serverKeyPassword?: string;
-		clientCertificateMode: SecuredWebServer.ClientCertificateMode;
 	}
+	export interface SecuredCommonWebServer extends SecuredBaseWebServer {
+		/**
+		 * Certificate's data as Buffer or Path to file
+		 */
+		caCertificates?: Buffer | string | Array<string | Buffer>;
+		clientCertificateMode:
+		SecuredWebServer.ClientCertificateMode.REQUEST |
+		SecuredWebServer.ClientCertificateMode.NONE;
+	}
+	export interface SecuredClientWebServer extends SecuredBaseWebServer {
+		/**
+		 * Certificate's data as Buffer or Path to file
+		 */
+		caCertificates: Buffer | string | Array<string | Buffer>;
+		clientCertificateMode:
+		SecuredWebServer.ClientCertificateMode.TRUST |
+		SecuredWebServer.ClientCertificateMode.XFCC;
+	}
+	export type SecuredWebServer = SecuredCommonWebServer | SecuredClientWebServer;
 
 	export namespace SecuredWebServer {
 		export const enum ClientCertificateMode {
@@ -67,7 +88,7 @@ export namespace Configuration {
 		readonly servers: Array<string>;
 	}
 
-	export interface BindEndpoint extends ServerEndpoint {
+	export interface BindEndpoint {
 		readonly bindPath: string;
 	}
 
@@ -87,29 +108,42 @@ export namespace Configuration {
 				return serverOpts;
 			}
 			case "https": {
+				let serverOpts: SecuredWebServer;
+
 				const clientCertMode: string = configuration.getString("clientCertificateMode");
 				switch (clientCertMode) {
 					case SecuredWebServer.ClientCertificateMode.NONE:
 					case SecuredWebServer.ClientCertificateMode.REQUEST:
+						serverOpts = {
+							type: serverType,
+							name: serverName,
+							listenHost: configuration.getString("listenHost"),
+							listenPort: configuration.getInteger("listenPort"),
+							serverCertificate: configuration.getString("serverCertificate"),
+							serverKey: configuration.getString("serverKey"),
+							clientCertificateMode: clientCertMode
+						};
+						if (configuration.hasKey("caCertificate")) {
+							serverOpts.caCertificates = configuration.getString("caCertificate");
+						}
+						break;
 					case SecuredWebServer.ClientCertificateMode.TRUST:
 					case SecuredWebServer.ClientCertificateMode.XFCC:
+						serverOpts = {
+							type: serverType,
+							name: serverName,
+							listenHost: configuration.getString("listenHost"),
+							listenPort: configuration.getInteger("listenPort"),
+							caCertificates: configuration.getString("caCertificate"),
+							serverCertificate: configuration.getString("serverCertificate"),
+							serverKey: configuration.getString("serverKey"),
+							clientCertificateMode: clientCertMode
+						};
 						break;
 					default:
 						throw new Error(`Unsupported value for clientCertMode: ${clientCertMode}`);
 				}
 
-				const serverOpts: SecuredWebServer = {
-					type: serverType,
-					name: serverName,
-					listenHost: configuration.getString("listenHost"),
-					listenPort: configuration.getInteger("listenPort"),
-					serverCertificate: configuration.getString("serverCertificate"),
-					serverKey: configuration.getString("serverKey"),
-					clientCertificateMode: clientCertMode
-				};
-				if (configuration.hasKey("caCertificate")) {
-					serverOpts.caCertificate = configuration.getString("caCertificate");
-				}
 				if (configuration.hasKey("serverKeyPassword")) {
 					serverOpts.serverKeyPassword = configuration.getString("serverKeyPassword");
 				}

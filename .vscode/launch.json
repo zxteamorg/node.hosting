@@ -30,6 +30,23 @@
 				"${workspaceRoot}/src/**/*.js",
 				"${workspaceRoot}/test/**/*.js"
 			]
-		}
+		},
+		{
+			"name": "onXfccRequestAppTest",
+			"type": "node",
+			"runtimeArgs": [
+				"--require",
+				"source-map-support/register",
+			],
+			"request": "launch",
+			"preLaunchTask": "compile:src:ts",
+			"cwd": "${workspaceRoot}",
+			"env": {
+				"NODE_ENV": "development",
+				"NODE_ALLOW_CONFLICT_MODULES": "1",
+				"LOG_LEVEL": "debug"
+			},
+			"program": "${workspaceRoot}/test/onXfccRequestAppTest.js"
+		},
 	]
 }

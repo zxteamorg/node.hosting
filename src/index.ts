@@ -19,17 +19,20 @@ import { Initable, Disposable } from "@zxteam/disposable";
 
 import * as express from "express";
 import * as fs from "fs";
+import * as net from "net";
 import * as http from "http";
 import * as https from "https";
+import { unescape as urlDecode } from "querystring";
 import { parse as parseURL } from "url";
 import * as WebSocket from "ws";
 import * as _ from "lodash";
+import { pki } from "node-forge";
 
 import { Configuration } from "./conf";
 
 export * from "./conf";
 
-export type WebServerRequestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => boolean;
+export type WebServerRequestHandler = http.RequestListener;
 
 export interface WebServer extends zxteam.Disposable {
 	readonly name: string;
@@ -40,12 +43,16 @@ export interface WebServer extends zxteam.Disposable {
 	listen(): Promise<void>;
 }
 
-export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBase> extends Disposable implements WebServer {
+export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBase | Configuration.WebServer>
+	extends Disposable implements WebServer {
 	public abstract readonly underlayingServer: http.Server | https.Server;
 	protected readonly _log: zxteam.Logger;
 	protected readonly _opts: TOpts;
 	protected readonly _websockets: { [bindPath: string]: WebSocket.Server };
+	private readonly _onUpgrade: (request: http.IncomingMessage, socket: net.Socket, head: Buffer) => void;
+	private readonly _onRequestImpl: http.RequestListener;
 	private readonly _handlers: Map</*bindPath: */string, WebServerRequestHandler>;
+	private readonly _caCertificates: Array<[pki.Certificate, Buffer]>;
 	private _rootExpressApplication: express.Application | null;
 
 	public constructor(opts: TOpts, log: zxteam.Logger) {
@@ -55,6 +62,54 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 		this._websockets = {};
 		this._handlers = new Map();
 		this._rootExpressApplication = null;
+
+
+		let onXfccRequest: http.RequestListener | null = null;
+		let onXfccUpgrade: ((request: http.IncomingMessage, socket: net.Socket, head: Buffer) => void) | null = null;
+		if ("type" in opts) {
+			const friendlyOpts = opts as Configuration.WebServer;
+			if (friendlyOpts.type === "http") {
+				if (
+					"clientCertificateMode" in friendlyOpts
+					&& friendlyOpts.clientCertificateMode === Configuration.SecuredWebServer.ClientCertificateMode.XFCC
+				) {
+					if (
+						friendlyOpts.caCertificates !== undefined &&
+						(
+							_.isString(friendlyOpts.caCertificates)
+							|| friendlyOpts.caCertificates instanceof Buffer
+							|| _.isArray(friendlyOpts.caCertificates)
+						)
+					) {
+						this._caCertificates = helper.parseCertificates(friendlyOpts.caCertificates);
+					} else {
+						throw new Error("ClientCertificateMode.XFCC required at least one CA certificate");
+					}
+
+					onXfccRequest = this.onRequestXFCC.bind(this);
+					onXfccUpgrade = this.onUpgradeXFCC.bind(this);
+				}
+			} else if (friendlyOpts.type === "https") {
+				if (
+					friendlyOpts.caCertificates !== undefined &&
+					(
+						_.isString(friendlyOpts.caCertificates)
+						|| friendlyOpts.caCertificates instanceof Buffer
+						|| _.isArray(friendlyOpts.caCertificates)
+					)
+				) {
+					this._caCertificates = helper.parseCertificates(friendlyOpts.caCertificates);
+				} else {
+					throw new Error("ClientCertificateMode.XFCC required at least one CA certificate");
+				}
+
+				onXfccRequest = this.onRequestXFCC.bind(this);
+				onXfccUpgrade = this.onUpgradeXFCC.bind(this);
+			}
+		}
+
+		this._onRequestImpl = onXfccRequest !== null ? onXfccRequest : this.onRequestCommon.bind(this);
+		this._onUpgrade = onXfccUpgrade !== null ? onXfccUpgrade : this.onUpgradeCommon.bind(this);
 	}
 
 	/**
@@ -95,25 +150,31 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 	}
 
 	public listen(): Promise<void> {
-		this.underlayingServer.on("upgrade", (request, socket, head) => {
-			const urlPath = request.url;
-			const wss = this._websockets[urlPath];
-			if (wss !== undefined) {
-				this._log.debug("Upgrade the server on url path for WebSocket server.", urlPath);
-				wss.handleUpgrade(request, socket, head, function (ws) {
-					wss.emit("connection", ws, request);
-				});
-			} else {
-				socket.destroy();
-			}
-		});
-
+		this.underlayingServer.on("upgrade", this._onUpgrade);
 		return this.onListen();
+	}
+
+	protected get caCertificatesAsPki(): Array<pki.Certificate> {
+		if (this._caCertificates === undefined) {
+			throw new Error("Wrong operation at current state.");
+		}
+		return this._caCertificates.map(tuple => tuple[0]);
+	}
+
+	protected get caCertificatesAsBuffer(): Array<Buffer> {
+		if (this._caCertificates === undefined) {
+			throw new Error("Wrong operation at current state.");
+		}
+		return this._caCertificates.map(tuple => tuple[1]);
 	}
 
 	protected abstract onListen(): Promise<void>;
 
 	protected onRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+		this._onRequestImpl(req, res);
+	}
+
+	private onRequestCommon(req: http.IncomingMessage, res: http.ServerResponse): void {
 		if (this._handlers.size > 0 && req.url !== undefined) {
 			const { pathname } = parseURL(req.url);
 			if (pathname !== undefined) {
@@ -137,6 +198,68 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 		res.writeHead(503);
 		res.statusMessage = "Service Unavailable";
 		res.end();
+	}
+
+	private onRequestXFCC(req: http.IncomingMessage, res: http.ServerResponse): void {
+		if (this.validateXFCC(req)) {
+			this.onRequestCommon(req, res);
+			return;
+		}
+
+		res.statusMessage = "Client certificate is required.";
+		res.writeHead(401);
+		res.end();
+	}
+
+	private onUpgradeCommon(req: http.IncomingMessage, socket: net.Socket, head: Buffer): void {
+		const urlPath = req.url;
+		if (urlPath !== undefined) {
+			const wss = this._websockets[urlPath];
+			if (wss !== undefined) {
+				this._log.debug("Upgrade the server on url path for WebSocket server.", urlPath);
+				wss.handleUpgrade(req, socket, head, function (ws) {
+					wss.emit("connection", ws, req);
+				});
+			} else {
+				socket.destroy();
+			}
+		} else {
+			socket.destroy();
+		}
+	}
+
+	private onUpgradeXFCC(req: http.IncomingMessage, socket: net.Socket, head: Buffer): void {
+		if (this.validateXFCC(req)) {
+			this.onUpgradeCommon(req, socket, head);
+			return;
+		}
+
+		socket.write("HTTP/1.1 401 Client certificate is required.\r\n\r\n");
+		socket.end();
+	}
+
+	private validateXFCC(req: http.IncomingMessage): boolean {
+		const xfccHeaderData = req && req.headers && req.headers["x-forwarded-client-cert"];
+		if (_.isString(xfccHeaderData)) {
+			this._log.trace("X-Forwarded-Client-Cert header:", xfccHeaderData);
+
+			const clientCertPem = urlDecode(xfccHeaderData);
+			const clientCert = pki.certificateFromPem(clientCertPem);
+
+			for (const caCert of this.caCertificatesAsPki) {
+				try {
+					if (caCert.verify(clientCert)) {
+						return true;
+					}
+				} catch (e) {
+					this._log.trace("Verify failed.", e);
+				}
+			}
+		} else {
+			this._log.debug("Request with no X-Forwarded-Client-Cert header.");
+		}
+
+		return false;
 	}
 }
 
@@ -215,45 +338,40 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 			cert: opts.serverCertificate instanceof Buffer ? opts.serverCertificate : fs.readFileSync(opts.serverCertificate),
 			key: opts.serverKey instanceof Buffer ? opts.serverKey : fs.readFileSync(opts.serverKey)
 		};
-		if (opts.caCertificate !== undefined) {
-			if (opts.caCertificate instanceof Buffer) {
-				serverOpts.ca = opts.caCertificate;
-			} else if (_.isString(opts.caCertificate)) {
-				serverOpts.ca = fs.readFileSync(opts.caCertificate);
-			} else {
-				serverOpts.ca = opts.caCertificate;
-			}
+
+		if (opts.caCertificates !== undefined) {
+			serverOpts.ca = this.caCertificatesAsBuffer;
 		}
 		if (opts.serverKeyPassword !== undefined) {
 			serverOpts.passphrase = opts.serverKeyPassword;
 		}
 
-		let onRequest: http.RequestListener;
-		switch (opts.clientCertificateMode) {
-			case Configuration.SecuredWebServer.ClientCertificateMode.NONE:
-				serverOpts.requestCert = false;
-				serverOpts.rejectUnauthorized = false;
-				onRequest = this.onRequest.bind(this);
-				break;
-			case Configuration.SecuredWebServer.ClientCertificateMode.REQUEST:
-				serverOpts.requestCert = true;
-				serverOpts.rejectUnauthorized = false;
-				onRequest = this.onRequest.bind(this);
-				break;
-			case Configuration.SecuredWebServer.ClientCertificateMode.XFCC:
-				serverOpts.requestCert = false;
-				serverOpts.rejectUnauthorized = false;
-				onRequest = this.onXfccRequest.bind(this);
-				break;
-			default:
-				// By default use Configuration.SecuredWebServer.ClientCertMode.TRUST mode
-				serverOpts.requestCert = true;
-				serverOpts.rejectUnauthorized = true;
-				onRequest = this.onRequest.bind(this);
-				break;
-		}
+		// let onRequest: http.RequestListener;
+		// switch (opts.clientCertificateMode) {
+		// 	case Configuration.SecuredWebServer.ClientCertificateMode.NONE:
+		// 		serverOpts.requestCert = false;
+		// 		serverOpts.rejectUnauthorized = false;
+		// 		onRequest = this.onRequest.bind(this);
+		// 		break;
+		// 	case Configuration.SecuredWebServer.ClientCertificateMode.REQUEST:
+		// 		serverOpts.requestCert = true;
+		// 		serverOpts.rejectUnauthorized = false;
+		// 		onRequest = this.onRequest.bind(this);
+		// 		break;
+		// 	case Configuration.SecuredWebServer.ClientCertificateMode.XFCC:
+		// 		serverOpts.requestCert = false;
+		// 		serverOpts.rejectUnauthorized = false;
+		// 		onRequest = this.onXfccRequest.bind(this);
+		// 		break;
+		// 	default:
+		// 		// By default use Configuration.SecuredWebServer.ClientCertMode.TRUST mode
+		// 		serverOpts.requestCert = true;
+		// 		serverOpts.rejectUnauthorized = true;
+		// 		onRequest = this.onRequest.bind(this);
+		// 		break;
+		// }
 
-		this._httpsServer = https.createServer(serverOpts, onRequest);
+		this._httpsServer = https.createServer(serverOpts, this.onRequest.bind(this));
 	}
 
 	public get underlayingServer(): https.Server { return this._httpsServer; }
@@ -305,31 +423,18 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 			});
 		});
 	}
-
-	private onXfccRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-		// TODO
-		const xfccHeaderData = req && req.headers && req.headers["x-forwarded-client-cert"];
-		this._log.info("onXfccRequest", req, req.headers);
-		if (_.isString(xfccHeaderData)) {
-			this._log.warn("Received Client Certificate:", xfccHeaderData);
-			this.onRequest(req, res);
-			return;
-		} else {
-			this._log.debug("Request with no X-Forwarded-Client-Cert header.");
-		}
-
-		res.writeHead(401);
-		res.statusMessage = "Unauthorized. Client Certificate is required.";
-		res.end();
-	}
 }
 
 export interface ProtocolAdapterNext<T> {
-	(): zxteam.Task<T>;
+	(cancellationToken: zxteam.CancellationToken, data: T): zxteam.Task<T>;
 }
 export interface ProtocolAdapter {
-	handleBinaryMessage(data: ArrayBuffer, next?: ProtocolAdapterNext<ArrayBuffer>): zxteam.Task<ArrayBuffer>;
-	handleTextMessage(data: string, next?: ProtocolAdapterNext<string>): zxteam.Task<string>;
+	handleBinaryMessage(
+		cancellationToken: zxteam.CancellationToken, data: ArrayBuffer, next?: ProtocolAdapterNext<ArrayBuffer>
+	): zxteam.Task<ArrayBuffer>;
+	handleTextMessage(
+		cancellationToken: zxteam.CancellationToken, data: string, next?: ProtocolAdapterNext<string>
+	): zxteam.Task<string>;
 }
 
 export type ProtocolAdapterFactory = () => Promise<ProtocolAdapter>;
@@ -417,7 +522,7 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 				webSocketServer.close((err) => {
 					if (err !== undefined) {
 						if (this._log.isWarnEnabled) {
-							this._log.warn(`Web Socket Server was closed with error. Inner message: ${err.message}`);
+							this._log.warn(`Web Socket Server was closed with error.Inner message: ${err.message} `);
 						}
 						this._log.trace("Web Socket Server was closed with error.", err);
 					}
@@ -434,26 +539,26 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 		const connectionNumber: number = this._connectionCounter++;
 		const ipAddress = request.connection.remoteAddress;
 		if (ipAddress !== undefined && this._log.isTraceEnabled) {
-			this._log.trace(`Connection #${connectionNumber} established from ${ipAddress}`);
+			this._log.trace(`Connection #${connectionNumber} was established from ${ipAddress} `);
 		}
 		if (this._log.isInfoEnabled) {
-			this._log.info(`Connection #${connectionNumber} established`);
+			this._log.info(`Connection #${connectionNumber} was established`);
 		}
 		webSocket.binaryType = "arraybuffer";
 		webSocket.onmessage = ({ data }) => {
 			Promise.resolve().then(() => this.onMessage(webSocket, data))
 				.catch(e => {
 					if (this._log.isInfoEnabled) {
-						this._log.info(`Connection #${connectionNumber} onMessage failed: ${e.message}`);
+						this._log.info(`Connection #${connectionNumber} onMessage failed: ${e.message} `);
 					}
 					if (this._log.isTraceEnabled) {
-						this._log.trace(`Connection #${connectionNumber} onMessage failed:`, e);
+						this._log.trace(`Connection #${connectionNumber} onMessage failed: `, e);
 					}
 				});
 		};
 		webSocket.onclose = ({ code, reason }) => {
 			if (this._log.isTraceEnabled) {
-				this._log.trace(`Connection #${connectionNumber} was closed: ${JSON.stringify({ code, reason })}`);
+				this._log.trace(`Connection #${connectionNumber} was closed: ${JSON.stringify({ code, reason })} `);
 			}
 			if (this._log.isInfoEnabled) {
 				this._log.info(`Connection #${connectionNumber} was closed`);
@@ -469,7 +574,7 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 		}
 		let nextProtocolAdapter: ProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
 		if (data instanceof ArrayBuffer) {
-			const next: ProtocolAdapterNext<ArrayBuffer> = () => {
+			const next: ProtocolAdapterNext<ArrayBuffer> = (cancellationToken: zxteam.CancellationToken, nextData: ArrayBuffer) => {
 				const currentProtocolAdapter = nextProtocolAdapter;
 				let nextFunc;
 				if (protocolAdapters.length > 0) {
@@ -478,12 +583,12 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 				} else {
 					nextFunc = undefined;
 				}
-				return currentProtocolAdapter.handleBinaryMessage(data, nextFunc);
+				return currentProtocolAdapter.handleBinaryMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next().promise;
+			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
 			webSocket.send(response);
 		} else if (_.isString(data)) {
-			const next: ProtocolAdapterNext<string> = () => {
+			const next: ProtocolAdapterNext<string> = (cancellationToken: zxteam.CancellationToken, nextData: string) => {
 				const currentProtocolAdapter = nextProtocolAdapter;
 				let nextFunc;
 				if (protocolAdapters.length > 0) {
@@ -492,9 +597,9 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 				} else {
 					nextFunc = undefined;
 				}
-				return currentProtocolAdapter.handleTextMessage(data, nextFunc);
+				return currentProtocolAdapter.handleTextMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next().promise;
+			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
 			webSocket.send(response);
 		} else {
 			throw new Error("Bad message");
@@ -541,4 +646,36 @@ export function createWebServers(
 	serversOpts: ReadonlyArray<Configuration.WebServer>, log: zxteam.Logger
 ): ReadonlyArray<WebServer> {
 	return serversOpts.map(serverOpts => createWebServer(serverOpts, log));
+}
+
+
+namespace helper {
+	function parseCertificate(caCertificate: Buffer | string): [pki.Certificate, Buffer] {
+		let cert: pki.Certificate;
+		let data: Buffer;
+
+		if (_.isString(caCertificate)) {
+			data = fs.readFileSync(caCertificate);
+			cert = pki.certificateFromPem(data.toString("ascii"));
+		} else {
+			data = caCertificate;
+			cert = pki.certificateFromPem(caCertificate.toString("ascii"));
+		}
+
+		return [cert, data];
+	}
+	export function parseCertificates(caCertificates: Buffer | string | Array<string | Buffer>): Array<[pki.Certificate, Buffer]> {
+		if (caCertificates instanceof Buffer || _.isString(caCertificates)) {
+			return [parseCertificate(caCertificates)];
+		} else {
+			return caCertificates.map(parseCertificate);
+		}
+	}
+
+	export const DUMMY_CANCELLATION_TOKEN: zxteam.CancellationToken = Object.freeze({
+		get isCancellationRequested() { return false; },
+		addCancelListener(cb: Function) { /***/ },
+		removeCancelListener(cb: Function) { /***/ },
+		throwIfCancellationRequested() { /***/ }
+	});
 }
