@@ -68,29 +68,28 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 		let onXfccUpgrade: ((request: http.IncomingMessage, socket: net.Socket, head: Buffer) => void) | null = null;
 		if ("type" in opts) {
 			const friendlyOpts = opts as Configuration.WebServer;
-			if (friendlyOpts.type === "http") {
+			if (
+				"clientCertificateMode" in friendlyOpts &&
+				friendlyOpts.clientCertificateMode === Configuration.ClientCertificateMode.XFCC
+			) {
 				if (
-					"clientCertificateMode" in friendlyOpts
-					&& friendlyOpts.clientCertificateMode === Configuration.ClientCertificateMode.XFCC
+					friendlyOpts.caCertificates === undefined ||
+					!(
+						_.isString(friendlyOpts.caCertificates)
+						|| friendlyOpts.caCertificates instanceof Buffer
+						|| _.isArray(friendlyOpts.caCertificates)
+					)
 				) {
-					if (
-						friendlyOpts.caCertificates !== undefined &&
-						(
-							_.isString(friendlyOpts.caCertificates)
-							|| friendlyOpts.caCertificates instanceof Buffer
-							|| _.isArray(friendlyOpts.caCertificates)
-						)
-					) {
-						this._caCertificates = helper.parseCertificates(friendlyOpts.caCertificates);
-					} else {
-						throw new Error("ClientCertificateMode.XFCC required at least one CA certificate");
-					}
-
-					onXfccRequest = this.onRequestXFCC.bind(this);
-					onXfccUpgrade = this.onUpgradeXFCC.bind(this);
+					throw new Error("ClientCertificateMode.XFCC required at least one CA certificate");
 				}
-			} else if (friendlyOpts.type === "https") {
+
+				this._caCertificates = parseCertificates(friendlyOpts.caCertificates);
+
+				onXfccRequest = this.onRequestXFCC.bind(this);
+				onXfccUpgrade = this.onUpgradeXFCC.bind(this);
+			} else {
 				if (
+					friendlyOpts.type === "https" &&
 					friendlyOpts.caCertificates !== undefined &&
 					(
 						_.isString(friendlyOpts.caCertificates)
@@ -98,13 +97,8 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 						|| _.isArray(friendlyOpts.caCertificates)
 					)
 				) {
-					this._caCertificates = helper.parseCertificates(friendlyOpts.caCertificates);
-				} else {
-					throw new Error("ClientCertificateMode.XFCC required at least one CA certificate");
+					this._caCertificates = parseCertificates(friendlyOpts.caCertificates);
 				}
-
-				onXfccRequest = this.onRequestXFCC.bind(this);
-				onXfccUpgrade = this.onUpgradeXFCC.bind(this);
 			}
 		}
 
@@ -340,36 +334,31 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 		};
 
 		if (opts.caCertificates !== undefined) {
-			serverOpts.ca = this.caCertificatesAsBuffer;
+			if (_.isString(opts.caCertificates)) {
+				serverOpts.ca = fs.readFileSync(opts.caCertificates);
+			}
+			//serverOpts.ca = this.caCertificatesAsBuffer;
 		}
 		if (opts.serverKeyPassword !== undefined) {
 			serverOpts.passphrase = opts.serverKeyPassword;
 		}
 
-		// let onRequest: http.RequestListener;
-		// switch (opts.clientCertificateMode) {
-		// 	case Configuration.SecuredWebServer.ClientCertificateMode.NONE:
-		// 		serverOpts.requestCert = false;
-		// 		serverOpts.rejectUnauthorized = false;
-		// 		onRequest = this.onRequest.bind(this);
-		// 		break;
-		// 	case Configuration.SecuredWebServer.ClientCertificateMode.REQUEST:
-		// 		serverOpts.requestCert = true;
-		// 		serverOpts.rejectUnauthorized = false;
-		// 		onRequest = this.onRequest.bind(this);
-		// 		break;
-		// 	case Configuration.SecuredWebServer.ClientCertificateMode.XFCC:
-		// 		serverOpts.requestCert = false;
-		// 		serverOpts.rejectUnauthorized = false;
-		// 		onRequest = this.onXfccRequest.bind(this);
-		// 		break;
-		// 	default:
-		// 		// By default use Configuration.SecuredWebServer.ClientCertMode.TRUST mode
-		// 		serverOpts.requestCert = true;
-		// 		serverOpts.rejectUnauthorized = true;
-		// 		onRequest = this.onRequest.bind(this);
-		// 		break;
-		// }
+		switch (opts.clientCertificateMode) {
+			case Configuration.ClientCertificateMode.NONE:
+			case Configuration.ClientCertificateMode.XFCC: // XFCC handled by AbstractWebServer
+				serverOpts.requestCert = false;
+				serverOpts.rejectUnauthorized = false;
+				break;
+			case Configuration.ClientCertificateMode.REQUEST:
+				serverOpts.requestCert = true;
+				serverOpts.rejectUnauthorized = false;
+				break;
+			default:
+				// By default use Configuration.SecuredWebServer.ClientCertMode.TRUST mode
+				serverOpts.requestCert = true;
+				serverOpts.rejectUnauthorized = true;
+				break;
+		}
 
 		this._httpsServer = https.createServer(serverOpts, this.onRequest.bind(this));
 	}
@@ -585,7 +574,7 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 				}
 				return currentProtocolAdapter.handleBinaryMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next(helper.DUMMY_CANCELLATION_TOKEN, data).promise;
+			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
 			webSocket.send(response);
 		} else if (_.isString(data)) {
 			const next: ProtocolAdapterNext<string> = (cancellationToken: zxteam.CancellationToken, nextData: string) => {
@@ -599,7 +588,7 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 				}
 				return currentProtocolAdapter.handleTextMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next(helper.DUMMY_CANCELLATION_TOKEN, data).promise;
+			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
 			webSocket.send(response);
 		} else {
 			throw new Error("Bad message");
@@ -649,33 +638,32 @@ export function createWebServers(
 }
 
 
-namespace helper {
-	function parseCertificate(certificate: Buffer | string): [pki.Certificate, Buffer] {
-		let cert: pki.Certificate;
-		let data: Buffer;
+function parseCertificate(certificate: Buffer | string): [pki.Certificate, Buffer] {
+	let cert: pki.Certificate;
+	let data: Buffer;
 
-		if (_.isString(certificate)) {
-			data = fs.readFileSync(certificate);
-			cert = pki.certificateFromPem(data.toString("ascii"));
-		} else {
-			data = certificate;
-			cert = pki.certificateFromPem(certificate.toString("ascii"));
-		}
-
-		return [cert, data];
-	}
-	export function parseCertificates(certificates: Buffer | string | Array<string | Buffer>): Array<[pki.Certificate, Buffer]> {
-		if (certificates instanceof Buffer || _.isString(certificates)) {
-			return [parseCertificate(certificates)];
-		} else {
-			return certificates.map(parseCertificate);
-		}
+	if (_.isString(certificate)) {
+		data = fs.readFileSync(certificate);
+		cert = pki.certificateFromPem(data.toString("ascii"));
+	} else {
+		data = certificate;
+		cert = pki.certificateFromPem(certificate.toString("ascii"));
 	}
 
-	export const DUMMY_CANCELLATION_TOKEN: zxteam.CancellationToken = Object.freeze({
-		get isCancellationRequested() { return false; },
-		addCancelListener(cb: Function) { /***/ },
-		removeCancelListener(cb: Function) { /***/ },
-		throwIfCancellationRequested() { /***/ }
-	});
+	return [cert, data];
 }
+function parseCertificates(certificates: Buffer | string | Array<string | Buffer>): Array<[pki.Certificate, Buffer]> {
+	if (certificates instanceof Buffer || _.isString(certificates)) {
+		return [parseCertificate(certificates)];
+	} else {
+		return certificates.map(parseCertificate);
+	}
+}
+
+const DUMMY_CANCELLATION_TOKEN: zxteam.CancellationToken = Object.freeze({
+	get isCancellationRequested() { return false; },
+	addCancelListener(cb: Function) { /***/ },
+	removeCancelListener(cb: Function) { /***/ },
+	throwIfCancellationRequested() { /***/ }
+});
+
