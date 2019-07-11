@@ -473,27 +473,34 @@ export abstract class RestEndpoint<TService> extends BindEndpoint {
 }
 
 export interface WebSocketBinderEndpoint {
-	use(protocolAdapter: ProtocolAdapter): void;
+	use(protocol: string, protocolAdapter: ProtocolAdapter): void;
 }
 
 export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
-	private readonly _protocolAdapters: Array<ProtocolAdapter>;
+	private readonly _protocolAdaptersMap: Map</* protocol: */string, Array<ProtocolAdapter>>;
+	private _defaultProtocol: string;
 	private _connectionCounter: number;
 
 	public constructor(
 		servers: ReadonlyArray<WebServer>,
-		opts: Configuration.BindEndpoint,
+		opts: Configuration.WebSocketEndpoint,
 		log: zxteam.Logger
 	) {
 		super(servers, opts, log);
 		this._webSocketServers = [];
-		this._protocolAdapters = [];
+		this._protocolAdaptersMap = new Map();
+		this._defaultProtocol = opts.defaultProtocol;
 		this._connectionCounter = 0;
 	}
 
-	public use(protocolAdapter: ProtocolAdapter): void {
-		this._protocolAdapters.push(protocolAdapter);
+	public use(protocol: string, protocolAdapter: ProtocolAdapter): void {
+		let items = this._protocolAdaptersMap.get(protocol);
+		if (items === undefined) {
+			items = [];
+			this._protocolAdaptersMap.set(protocol, items);
+		}
+		items.push(protocolAdapter);
 	}
 
 	protected onInit(): void {
@@ -533,6 +540,21 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 		if (this._log.isInfoEnabled) {
 			this._log.info(`Connection #${connectionNumber} was established`);
 		}
+
+		const protocol = webSocket.protocol || this._defaultProtocol;
+		const protocolAdapters = (() => {
+			const items = this._protocolAdaptersMap.get(protocol);
+			return items !== undefined ? items.slice(0) : [];
+		})();
+		if (protocolAdapters.length === 0) {
+			this._log.warn(`Connection #${connectionNumber} dropped. No any adapters to handle protocol: ${protocol}`);
+			// https://tools.ietf.org/html/rfc6455#section-7.4.1
+			webSocket.close(1007, `Wrong sub-protocol: ${protocol}`);
+			webSocket.terminate();
+			return;
+		}
+		(webSocket as any).protocolAdapters = protocolAdapters;
+
 		webSocket.binaryType = "arraybuffer";
 		webSocket.onmessage = ({ data }) => {
 			Promise.resolve().then(() => this.onMessage(webSocket, data))
@@ -556,11 +578,7 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 	}
 
 	protected async onMessage(webSocket: WebSocket, data: WebSocket.Data): Promise<void> {
-		const protocolAdapters = this._protocolAdapters.slice(0);
-		if (protocolAdapters.length === 0) {
-			this._log.warn("Message received but no any protocol adapters to handle it.");
-			return;
-		}
+		const protocolAdapters: Array<ProtocolAdapter> = (webSocket as any).protocolAdapters.slice();
 		let nextProtocolAdapter: ProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
 		if (data instanceof ArrayBuffer) {
 			const next: ProtocolAdapterNext<ArrayBuffer> = (cancellationToken: zxteam.CancellationToken, nextData: ArrayBuffer) => {
@@ -593,7 +611,6 @@ export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEn
 		} else {
 			throw new Error("Bad message");
 		}
-
 	}
 }
 
@@ -666,4 +683,3 @@ const DUMMY_CANCELLATION_TOKEN: zxteam.CancellationToken = Object.freeze({
 	removeCancelListener(cb: Function) { /***/ },
 	throwIfCancellationRequested() { /***/ }
 });
-

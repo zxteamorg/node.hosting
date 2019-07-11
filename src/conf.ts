@@ -86,11 +86,14 @@ export namespace Configuration {
 		readonly bindPath: string;
 	}
 
+	export interface WebSocketEndpoint extends BindEndpoint {
+		readonly defaultProtocol: string;
+	}
+
 	export function parseWebServer(configuration: zxteam.Configuration, serverName: string): WebServer {
 		const serverType = configuration.getString("type");
 		switch (serverType) {
 			case "http": {
-
 				if (configuration.hasKey("clientCertificateMode")) {
 					const clientCertificateMode = configuration.getString("clientCertificateMode");
 					if (clientCertificateMode !== Configuration.ClientCertificateMode.XFCC) {

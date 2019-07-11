@@ -205,12 +205,13 @@ async function main() {
 	const wsEndpoint = new THE.WebSocketEndpoint(
 		[server1, server2],
 		{
-			bindPath: "/ws"
+			bindPath: "/ws",
+			defaultProtocol: "test"
 		},
 		loggerManager.getLogger("wsEndpoint")
 	);
-	wsEndpoint.use(new MyProtocolAdapter());
-	wsEndpoint.use(new MyProtocolAdapter2());
+	wsEndpoint.use("test", new MyProtocolAdapter());
+	wsEndpoint.use("test", new MyProtocolAdapter2());
 
 	await restEndpoint.init().promise;
 	await wsEndpoint.init().promise;
