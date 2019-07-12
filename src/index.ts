@@ -428,36 +428,34 @@ export interface ProtocolAdapter {
 
 export type ProtocolAdapterFactory = () => Promise<ProtocolAdapter>;
 
-export abstract class ServerEndpoint extends Initable {
-	protected readonly _servers: ReadonlyArray<WebServer>;
+export abstract class BindEndpoint extends Initable {
 	protected readonly _log: zxteam.Logger;
+	protected readonly _bindPath: string;
 
 	public constructor(
-		servers: ReadonlyArray<WebServer>,
+		opts: Configuration.BindEndpoint,
 		log: zxteam.Logger
 	) {
 		super();
-
-		this._servers = servers;
 		this._log = log;
+		this._bindPath = opts.bindPath;
 	}
 }
 
-export abstract class BindEndpoint extends ServerEndpoint {
-	protected readonly _bindPath: string;
+export abstract class ServersBindEndpoint extends BindEndpoint {
+	protected readonly _servers: ReadonlyArray<WebServer>;
 
 	public constructor(
 		servers: ReadonlyArray<WebServer>,
 		opts: Configuration.BindEndpoint,
 		log: zxteam.Logger
 	) {
-		super(servers, log);
-
-		this._bindPath = opts.bindPath;
+		super(opts, log);
+		this._servers = servers;
 	}
 }
 
-export abstract class RestEndpoint<TService> extends BindEndpoint {
+export abstract class RestEndpoint<TService> extends ServersBindEndpoint {
 	protected readonly _service: TService;
 
 	public constructor(
@@ -476,7 +474,7 @@ export interface WebSocketBinderEndpoint {
 	use(protocol: string, protocolAdapter: ProtocolAdapter): void;
 }
 
-export class WebSocketEndpoint extends BindEndpoint implements WebSocketBinderEndpoint {
+export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketBinderEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
 	private readonly _protocolAdaptersMap: Map</* protocol: */string, Array<ProtocolAdapter>>;
 	private _defaultProtocol: string;
