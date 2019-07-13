@@ -1,10 +1,11 @@
 import * as zxteam from "@zxteam/contract";
 import { loggerManager } from "@zxteam/logger";
-import { Task } from "@zxteam/task";
+import { Task, DUMMY_CANCELLATION_TOKEN } from "@zxteam/task";
 
 import * as http from "http";
 
-import * as THE from "..";
+import * as THE from "../src/index";
+import { Disposable } from "@zxteam/disposable";
 
 const masterKey = `-----BEGIN RSA PRIVATE KEY-----
 MIIG5gIBAAKCAYEAo217jokGik9mtuXKVRehYN+iVvn5EukUpfislCJZnSAbiqff
@@ -124,6 +125,46 @@ rOgEbvrU9VHU1UkWSoCXefFQyw==
 let server1: THE.SecuredWebServer;
 let server2: THE.UnsecuredWebServer;
 
+class TimerSubsciberChannel extends Disposable implements zxteam.SubscriberChannel<Date> {
+	private readonly _timeout: number;
+	private readonly _handlers: Set<zxteam.SubscriberChannel.Callback<Date, zxteam.SubscriberChannel.Event<Date>>>;
+	private _timer?: NodeJS.Timeout;
+
+	public constructor(timeout: number) {
+		super();
+		this._timeout = timeout;
+		this._handlers = new Set();
+	}
+
+	public addHandler(cb: zxteam.SubscriberChannel.Callback<Date, zxteam.SubscriberChannel.Event<Date>>): void {
+		if (this._timer === undefined) {
+			this._timer = setInterval(this.onTimer.bind(this), this._timeout);
+		}
+		this._handlers.add(cb);
+	}
+	public removeHandler(cb: zxteam.SubscriberChannel.Callback<Date, zxteam.SubscriberChannel.Event<Date>>): void {
+		this._handlers.delete(cb);
+		if (this._timer !== undefined) {
+			clearInterval(this._timer);
+			delete this._timer;
+		}
+	}
+	protected onDispose() {
+		if (this._timer !== undefined) {
+			clearInterval(this._timer);
+			delete this._timer;
+		}
+		this._handlers.clear();
+	}
+
+	private onTimer() {
+		const now = new Date();
+		this._handlers.forEach(h => h(DUMMY_CANCELLATION_TOKEN, { data: now }));
+	}
+}
+
+const subscriptionChannel = new TimerSubsciberChannel(250);
+
 class MyRestEndpoint extends THE.RestEndpoint<undefined> {
 	protected onInit(): void {
 		this._servers.map(server => {
@@ -139,34 +180,101 @@ class MyRestEndpoint extends THE.RestEndpoint<undefined> {
 		res.end("Hello, World!!!");
 	}
 }
-class MyProtocolAdapter implements THE.ProtocolAdapter {
-	public handleBinaryMessage(
-		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapterNext<ArrayBuffer>
-	): zxteam.Task<ArrayBuffer> {
-		if (next !== undefined) {
-			return next(ct, data);
-		}
-		return Task.reject(new Error("Next was not provided"));
+
+class SubsciberHandle {
+	private readonly _timerSubsciberChannel: TimerSubsciberChannel;
+	private readonly _publisherChannel: zxteam.PublisherChannel<string>;
+	private readonly _event: zxteam.SubscriberChannel.Callback<Date, zxteam.SubscriberChannel.Event<Date>>;
+	private readonly _token: string;
+
+	public constructor(timerSubsciberChannel: TimerSubsciberChannel, publisherChannel: zxteam.PublisherChannel<string>) {
+		this._timerSubsciberChannel = timerSubsciberChannel;
+		this._publisherChannel = publisherChannel;
+		this._event = this.onEvent.bind(this);
+		this._token = Date.now().toString();
+
+		this._timerSubsciberChannel.addHandler(this._event);
 	}
-	public handleTextMessage(
-		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapterNext<string>
-	): zxteam.Task<string> {
-		if (next !== undefined) {
-			return next(ct, data);
+
+	public get token(): string { return this._token; }
+
+	public destroy() {
+		this._timerSubsciberChannel.removeHandler(this._event);
+	}
+
+	private onEvent(cancellationToken: zxteam.CancellationToken, ev: zxteam.SubscriberChannel.Event<Date> | Error): void {
+		if (ev instanceof Error) {
+			this._publisherChannel.send(cancellationToken, `[${this._token}] Failed: ${ev.message}`);
+			return;
 		}
-		return Task.reject(new Error("Next was not provided"));
+		this._publisherChannel.send(cancellationToken, `[${this._token}] Now: ${ev.data}`);
 	}
 }
-class MyProtocolAdapter2 implements THE.ProtocolAdapter {
-	public handleBinaryMessage(
-		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapterNext<ArrayBuffer>
-	): zxteam.Task<ArrayBuffer> {
-		return Task.resolve(data);
+
+class MyTextProtocolAdapter extends THE.AbstractProtocolAdapter<string> {
+	private readonly _subscribers: Map<string, SubsciberHandle>;
+
+	public constructor(callbackChannel: THE.ProtocolAdapter.CallbackChannel<string>, log: zxteam.Logger) {
+		super(callbackChannel, log);
+		this._subscribers = new Map();
 	}
-	public handleTextMessage(
-		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapterNext<string>
-	): zxteam.Task<string> {
-		return Task.resolve(data);
+
+	public handleMessage(
+		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapter.Next<string>
+	) {
+		if (data === "Hello") {
+			return Promise.resolve("World!!!");
+		} else if (data === "subscribe") {
+			const handle = new SubsciberHandle(subscriptionChannel, this._callbackChannel);
+			this._subscribers.set(handle.token, handle);
+		}
+
+		if (next !== undefined) {
+			return next(ct, data);
+		}
+		return Promise.reject(new Error("Next was not provided"));
+	}
+
+	protected onDispose() {
+		for (const s of this._subscribers.values()) {
+			s.destroy();
+		}
+		this._subscribers.clear();
+	}
+}
+class MyTextProtocolAdapter2 extends THE.AbstractProtocolAdapter<string> {
+	public handleMessage(
+		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapter.Next<string>
+	) {
+		return Promise.resolve(data);
+	}
+	protected onDispose() {
+		//nop
+	}
+}
+
+class MyBinaryProtocolAdapter extends THE.AbstractProtocolAdapter<ArrayBuffer> {
+	public handleMessage(
+		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapter.Next<ArrayBuffer>
+	) {
+		if (next !== undefined) {
+			return next(ct, data);
+		}
+		return Promise.reject(new Error("Next was not provided"));
+	}
+
+	protected onDispose() {
+		//nop
+	}
+}
+class MyBinaryProtocolAdapter2 extends THE.AbstractProtocolAdapter<ArrayBuffer> {
+	public handleMessage(
+		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapter.Next<ArrayBuffer>
+	) {
+		return Promise.resolve(data);
+	}
+	protected onDispose() {
+		//nop
 	}
 }
 
@@ -185,8 +293,8 @@ async function main() {
 	}, loggerManager.getLogger("Secured Server"));
 
 	server2 = new THE.UnsecuredWebServer({
-		caCertificates: [Buffer.from(caCertificate1), Buffer.from(caCertificate2)],
-		clientCertificateMode: THE.Configuration.ClientCertificateMode.XFCC,
+		// caCertificates: [Buffer.from(caCertificate1), Buffer.from(caCertificate2)],
+		// clientCertificateMode: THE.Configuration.ClientCertificateMode.XFCC,
 		type: "http",
 		listenHost: "0.0.0.0",
 		listenPort: 8440,
@@ -206,18 +314,37 @@ async function main() {
 		[server1, server2],
 		{
 			bindPath: "/ws",
-			defaultProtocol: "test"
+			defaultProtocol: "text"
 		},
 		loggerManager.getLogger("wsEndpoint")
 	);
-	wsEndpoint.use("test", new MyProtocolAdapter());
-	wsEndpoint.use("test", new MyProtocolAdapter2());
+	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter(ch, loggerManager.getLogger("MyTextProtocolAdapter")));
+	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter2(ch, loggerManager.getLogger("MyTextProtocolAdapter2")));
 
-	await restEndpoint.init().promise;
-	await wsEndpoint.init().promise;
+	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter(ch, loggerManager.getLogger("MyBinaryProtocolAdapter")));
+	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter2(ch, loggerManager.getLogger("MyBinaryProtocolAdapter2")));
 
-	await server1.listen();
-	await server2.listen();
+	await restEndpoint.init(DUMMY_CANCELLATION_TOKEN);
+	await wsEndpoint.init(DUMMY_CANCELLATION_TOKEN);
+
+	await server1.init(DUMMY_CANCELLATION_TOKEN);
+	await server2.init(DUMMY_CANCELLATION_TOKEN);
+
+	let destroyRequestCount = 0;
+	async function gracefulShutdown(signal: string) {
+		if (destroyRequestCount++ === 0) {
+			console.log(`Interrupt signal received: ${signal}`);
+			await wsEndpoint.dispose();
+			await restEndpoint.dispose();
+			await server2.dispose();
+			await server1.dispose();
+			process.exit(0);
+		} else {
+			console.log(`Interrupt signal (${destroyRequestCount}) received: ${signal}`);
+		}
+	}
+
+	["SIGTERM", "SIGINT"].forEach((signal: NodeJS.Signals) => process.on(signal, () => gracefulShutdown(signal)));
 }
 
 main().catch(e => {

@@ -16,6 +16,7 @@ if (PACKAGE_GUARD in G) {
 
 import * as zxteam from "@zxteam/contract";
 import { Initable, Disposable } from "@zxteam/disposable";
+import { Task } from "@zxteam/task";
 
 import * as express from "express";
 import * as fs from "fs";
@@ -40,11 +41,10 @@ export interface WebServer extends zxteam.Disposable {
 	rootExpressApplication: express.Application;
 	bindRequestHandler(bindPath: string, handler: WebServerRequestHandler): void;
 	createWebSocketServer(bindPath: string): WebSocket.Server;
-	listen(): Promise<void>;
 }
 
 export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBase | Configuration.WebServer>
-	extends Disposable implements WebServer {
+	extends Initable implements WebServer {
 	public abstract readonly underlayingServer: http.Server | https.Server;
 	protected readonly _log: zxteam.Logger;
 	protected readonly _opts: TOpts;
@@ -143,7 +143,7 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 		return websocketServer;
 	}
 
-	public listen(): Promise<void> {
+	protected onInit(): Promise<void> {
 		this.underlayingServer.on("upgrade", this._onUpgrade);
 		return this.onListen();
 	}
@@ -414,19 +414,39 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 	}
 }
 
-export interface ProtocolAdapterNext<T> {
-	(cancellationToken: zxteam.CancellationToken, data: T): zxteam.Task<T>;
+export interface ProtocolAdapter<TSerialData extends ProtocolAdapter.SerialData> extends zxteam.Disposable {
+	handleMessage(
+		cancellationToken: zxteam.CancellationToken,
+		data: TSerialData,
+		next?: ProtocolAdapter.Next<TSerialData>
+	): Promise<TSerialData>;
 }
-export interface ProtocolAdapter {
-	handleBinaryMessage(
-		cancellationToken: zxteam.CancellationToken, data: ArrayBuffer, next?: ProtocolAdapterNext<ArrayBuffer>
-	): zxteam.Task<ArrayBuffer>;
-	handleTextMessage(
-		cancellationToken: zxteam.CancellationToken, data: string, next?: ProtocolAdapterNext<string>
-	): zxteam.Task<string>;
+export namespace ProtocolAdapter {
+	export type SerialData = ArrayBuffer | string;
+	export interface Next<TSerialData extends SerialData> {
+		(cancellationToken: zxteam.CancellationToken, data: TSerialData): Promise<TSerialData>;
+	}
+	export type CallbackChannel<TSerialData extends ProtocolAdapter.SerialData> = zxteam.PublisherChannel<TSerialData>;
 }
 
-export type ProtocolAdapterFactory = () => Promise<ProtocolAdapter>;
+export interface ProtocolAdapterFactory<TSerialData extends ProtocolAdapter.SerialData> {
+	(callbackChannel: ProtocolAdapter.CallbackChannel<TSerialData>): ProtocolAdapter<TSerialData>;
+}
+
+export abstract class AbstractProtocolAdapter<TSerialData extends ProtocolAdapter.SerialData>
+	extends Disposable
+	implements ProtocolAdapter<TSerialData> {
+	protected readonly _callbackChannel: ProtocolAdapter.CallbackChannel<TSerialData>;
+	protected readonly _log: zxteam.Logger;
+	public constructor(callbackChannel: ProtocolAdapter.CallbackChannel<TSerialData>, log: zxteam.Logger) {
+		super();
+		this._callbackChannel = callbackChannel;
+		this._log = log;
+	}
+	public abstract handleMessage(
+		cancellationToken: zxteam.CancellationToken, data: TSerialData, next?: ProtocolAdapter.Next<TSerialData>
+	): Promise<TSerialData>;
+}
 
 export abstract class BindEndpoint extends Initable {
 	protected readonly _log: zxteam.Logger;
@@ -471,12 +491,15 @@ export abstract class RestEndpoint<TService> extends ServersBindEndpoint {
 }
 
 export interface WebSocketBinderEndpoint {
-	use(protocol: string, protocolAdapter: ProtocolAdapter): void;
+	useBinaryAdapter(protocol: string, protocolAdapterFactory: ProtocolAdapterFactory<ArrayBuffer>): void;
+	useTextAdapter(protocol: string, protocolAdapterFactory: ProtocolAdapterFactory<string>): void;
 }
 
 export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketBinderEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
-	private readonly _protocolAdaptersMap: Map</* protocol: */string, Array<ProtocolAdapter>>;
+	private readonly _binaryProtocolAdapterFactoryMap: Map</* protocol: */string, Array<ProtocolAdapterFactory<ArrayBuffer>>>;
+	private readonly _textProtocolAdapterFactoryMap: Map</* protocol: */string, Array<ProtocolAdapterFactory<string>>>;
+	private readonly _connections: Set<WebSocket>;
 	private _defaultProtocol: string;
 	private _connectionCounter: number;
 
@@ -487,18 +510,29 @@ export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketB
 	) {
 		super(servers, opts, log);
 		this._webSocketServers = [];
-		this._protocolAdaptersMap = new Map();
+		this._binaryProtocolAdapterFactoryMap = new Map();
+		this._textProtocolAdapterFactoryMap = new Map();
+		this._connections = new Set();
 		this._defaultProtocol = opts.defaultProtocol;
 		this._connectionCounter = 0;
 	}
 
-	public use(protocol: string, protocolAdapter: ProtocolAdapter): void {
-		let items = this._protocolAdaptersMap.get(protocol);
+	public useBinaryAdapter(protocol: string, protocolAdapterFactory: ProtocolAdapterFactory<ArrayBuffer>): void {
+		let items = this._binaryProtocolAdapterFactoryMap.get(protocol);
 		if (items === undefined) {
 			items = [];
-			this._protocolAdaptersMap.set(protocol, items);
+			this._binaryProtocolAdapterFactoryMap.set(protocol, items);
 		}
-		items.push(protocolAdapter);
+		items.push(protocolAdapterFactory);
+	}
+
+	public useTextAdapter(protocol: string, protocolAdapterFactory: ProtocolAdapterFactory<string>): void {
+		let items = this._textProtocolAdapterFactoryMap.get(protocol);
+		if (items === undefined) {
+			items = [];
+			this._textProtocolAdapterFactoryMap.set(protocol, items);
+		}
+		items.push(protocolAdapterFactory);
 	}
 
 	protected onInit(): void {
@@ -510,6 +544,13 @@ export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketB
 	}
 
 	protected async onDispose() {
+		const connections = [...this._connections.values()];
+		this._connections.clear();
+		for (const webSocket of connections) {
+			webSocket.close(1001, "going away");
+			webSocket.terminate();
+		}
+
 		const webSocketServers = this._webSocketServers.splice(0).reverse();
 		for (const webSocketServer of webSocketServers) {
 			await new Promise((resolve) => {
@@ -529,6 +570,13 @@ export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketB
 	}
 
 	protected onConnection(webSocket: WebSocket, request: http.IncomingMessage): void {
+		if (this.disposing) {
+			// https://tools.ietf.org/html/rfc6455#section-7.4.1
+			webSocket.close(1001, "going away");
+			webSocket.terminate();
+			return;
+		}
+
 		if (this._connectionCounter === Number.MAX_SAFE_INTEGER) { this._connectionCounter = 0; }
 		const connectionNumber: number = this._connectionCounter++;
 		const ipAddress = request.connection.remoteAddress;
@@ -539,23 +587,55 @@ export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketB
 			this._log.info(`Connection #${connectionNumber} was established`);
 		}
 
-		const protocol = webSocket.protocol || this._defaultProtocol;
-		const protocolAdapters = (() => {
-			const items = this._protocolAdaptersMap.get(protocol);
-			return items !== undefined ? items.slice(0) : [];
+		const subProtocol = webSocket.protocol || this._defaultProtocol;
+
+		const wsBinaryCallbackChannel: ProtocolAdapter.CallbackChannel<ArrayBuffer> = {
+			async dispose() { /* nop */ },
+			async send(cancellationToken: zxteam.CancellationToken, data: ArrayBuffer): Promise<void> {
+				return new Promise(sendResolve => {
+					webSocket.send(data, () => {
+						sendResolve();
+					});
+				});
+			}
+		};
+		const wsTextCallbackChannel: ProtocolAdapter.CallbackChannel<string> = {
+			async dispose() { /* nop */ },
+			async send(cancellationToken: zxteam.CancellationToken, data: string): Promise<void> {
+				return new Promise(sendResolve => {
+					webSocket.send(data, () => {
+						sendResolve();
+					});
+				});
+			}
+		};
+
+		const binaryProtocolAdapters = (() => {
+			const factories = this._binaryProtocolAdapterFactoryMap.get(subProtocol);
+			return factories !== undefined ? factories.map(f => f(wsBinaryCallbackChannel)) : [];
 		})();
-		if (protocolAdapters.length === 0) {
-			this._log.warn(`Connection #${connectionNumber} dropped. No any adapters to handle protocol: ${protocol}`);
+		const textProtocolAdapters = (() => {
+			const factories = this._textProtocolAdapterFactoryMap.get(subProtocol);
+			return factories !== undefined ? factories.map(f => f(wsTextCallbackChannel)) : [];
+		})();
+
+		if (binaryProtocolAdapters.length === 0 && textProtocolAdapters.length === 0) {
+			this._log.warn(`Connection #${connectionNumber} dropped. No any adapters to handle protocol: ${subProtocol}`);
 			// https://tools.ietf.org/html/rfc6455#section-7.4.1
-			webSocket.close(1007, `Wrong sub-protocol: ${protocol}`);
+			webSocket.close(1007, `Wrong sub-protocol: ${subProtocol}`);
 			webSocket.terminate();
 			return;
 		}
-		(webSocket as any).protocolAdapters = protocolAdapters;
+
+		(webSocket as any).connectionNumber = connectionNumber;
+		(webSocket as any).binaryProtocolAdapters = binaryProtocolAdapters;
+		(webSocket as any).textProtocolAdapters = textProtocolAdapters;
+
+		const cancellationTokenSource = Task.createCancellationTokenSource();
 
 		webSocket.binaryType = "arraybuffer";
 		webSocket.onmessage = ({ data }) => {
-			Promise.resolve().then(() => this.onMessage(webSocket, data))
+			this.onMessage(cancellationTokenSource.token, webSocket, data)
 				.catch(e => {
 					if (this._log.isInfoEnabled) {
 						this._log.info(`Connection #${connectionNumber} onMessage failed: ${e.message} `);
@@ -572,40 +652,85 @@ export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketB
 			if (this._log.isInfoEnabled) {
 				this._log.info(`Connection #${connectionNumber} was closed`);
 			}
+
+			cancellationTokenSource.cancel();
+			this._connections.delete(webSocket);
+			binaryProtocolAdapters.forEach(binaryProtocolAdapter => binaryProtocolAdapter.dispose());
+			textProtocolAdapters.forEach(textProtocolAdapter => textProtocolAdapter.dispose());
 		};
+
+		this._connections.add(webSocket);
 	}
 
-	protected async onMessage(webSocket: WebSocket, data: WebSocket.Data): Promise<void> {
-		const protocolAdapters: Array<ProtocolAdapter> = (webSocket as any).protocolAdapters.slice();
-		let nextProtocolAdapter: ProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
+	protected async onMessage(ct: zxteam.CancellationToken, webSocket: WebSocket, data: WebSocket.Data): Promise<void> {
 		if (data instanceof ArrayBuffer) {
-			const next: ProtocolAdapterNext<ArrayBuffer> = (cancellationToken: zxteam.CancellationToken, nextData: ArrayBuffer) => {
+			const protocolAdapters: Array<ProtocolAdapter<ArrayBuffer>> = (webSocket as any).binaryProtocolAdapters.slice();
+
+			if (protocolAdapters.length === 0) {
+				if (this._log.isDebugEnabled) {
+					this._log.debug(
+						`Connection #${(webSocket as any).connectionNumber} cannot handle a message due no any binary protocol adapters. Terminate socket...`
+					);
+				}
+				// https://tools.ietf.org/html/rfc6455#section-7.4.1
+				webSocket.close(1003, `Binary messages are not supported`);
+				webSocket.terminate();
+				return;
+			}
+
+			let nextProtocolAdapter: ProtocolAdapter<ArrayBuffer> = protocolAdapters.shift() as ProtocolAdapter<ArrayBuffer>;
+			const next: ProtocolAdapter.Next<ArrayBuffer> = (cancellationToken: zxteam.CancellationToken, nextData: ArrayBuffer) => {
 				const currentProtocolAdapter = nextProtocolAdapter;
 				let nextFunc;
 				if (protocolAdapters.length > 0) {
 					nextFunc = next;
-					nextProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
+					nextProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter<ArrayBuffer>;
 				} else {
 					nextFunc = undefined;
 				}
-				return currentProtocolAdapter.handleBinaryMessage(cancellationToken, nextData, nextFunc);
+				return currentProtocolAdapter.handleMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
-			webSocket.send(response);
+
+			const response: ArrayBuffer = await next(ct, data);
+			await new Promise(sendResolve => {
+				webSocket.send(response, () => {
+					sendResolve();
+				});
+			});
 		} else if (_.isString(data)) {
-			const next: ProtocolAdapterNext<string> = (cancellationToken: zxteam.CancellationToken, nextData: string) => {
+			const protocolAdapters: Array<ProtocolAdapter<string>> = (webSocket as any).textProtocolAdapters.slice();
+
+			if (protocolAdapters.length === 0) {
+				if (this._log.isDebugEnabled) {
+					this._log.debug(
+						`Connection #${(webSocket as any).connectionNumber} cannot handle a message due no any text protocol adapters. Terminate socket...`
+					);
+				}
+				// https://tools.ietf.org/html/rfc6455#section-7.4.1
+				webSocket.close(1003, `Text messages are not supported`);
+				webSocket.terminate();
+				return;
+			}
+
+			let nextProtocolAdapter: ProtocolAdapter<string> = protocolAdapters.shift() as ProtocolAdapter<string>;
+			const next: ProtocolAdapter.Next<string> = (cancellationToken: zxteam.CancellationToken, nextData: string) => {
 				const currentProtocolAdapter = nextProtocolAdapter;
 				let nextFunc;
 				if (protocolAdapters.length > 0) {
 					nextFunc = next;
-					nextProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter;
+					nextProtocolAdapter = protocolAdapters.shift() as ProtocolAdapter<string>;
 				} else {
 					nextFunc = undefined;
 				}
-				return currentProtocolAdapter.handleTextMessage(cancellationToken, nextData, nextFunc);
+				return currentProtocolAdapter.handleMessage(cancellationToken, nextData, nextFunc);
 			};
-			const response = await next(DUMMY_CANCELLATION_TOKEN, data).promise;
-			webSocket.send(response);
+
+			const response: string = await next(ct, data);
+			await new Promise(sendResolve => {
+				webSocket.send(response, () => {
+					sendResolve();
+				});
+			});
 		} else {
 			throw new Error("Bad message");
 		}
