@@ -35,7 +35,7 @@ export * from "./conf";
 
 export type WebServerRequestHandler = http.RequestListener;
 
-export interface WebServer extends zxteam.Disposable {
+export interface WebServer extends zxteam.Initable {
 	readonly name: string;
 	readonly underlayingServer: http.Server | https.Server;
 	rootExpressApplication: express.Application;
