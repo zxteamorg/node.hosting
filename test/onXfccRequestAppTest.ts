@@ -1,6 +1,6 @@
 import * as zxteam from "@zxteam/contract";
 import { loggerManager } from "@zxteam/logger";
-import { Task, DUMMY_CANCELLATION_TOKEN } from "@zxteam/task";
+import { DUMMY_CANCELLATION_TOKEN } from "@zxteam/cancellation";
 
 import * as http from "http";
 
@@ -159,7 +159,7 @@ class TimerSubsciberChannel extends Disposable implements zxteam.SubscriberChann
 
 	private onTimer() {
 		const now = new Date();
-		this._handlers.forEach(h => h(DUMMY_CANCELLATION_TOKEN, { data: now }));
+		this._handlers.forEach(h => h({ data: now }));
 	}
 }
 

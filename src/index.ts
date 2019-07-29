@@ -1,22 +1,22 @@
-const { name, version } = require(require("path").join(__dirname, "..", "package.json"));
+const { name: packageName, version: packageVersion } = require(require("path").join(__dirname, "..", "package.json"));
 const G: any = global || window || {};
-const PACKAGE_GUARD: symbol = Symbol.for(name);
+const PACKAGE_GUARD: symbol = Symbol.for(packageName);
 if (PACKAGE_GUARD in G) {
 	const conflictVersion = G[PACKAGE_GUARD];
 	// tslint:disable-next-line: max-line-length
-	const msg = `Conflict module version. Look like two different version of package ${name} was loaded inside the process: ${conflictVersion} and ${version}.`;
+	const msg = `Conflict module version. Look like two different version of package ${packageName} was loaded inside the process: ${conflictVersion} and ${packageVersion}.`;
 	if (process !== undefined && process.env !== undefined && process.env.NODE_ALLOW_CONFLICT_MODULES === "1") {
 		console.warn(msg + " This treats as warning because NODE_ALLOW_CONFLICT_MODULES is set.");
 	} else {
 		throw new Error(msg + " Use NODE_ALLOW_CONFLICT_MODULES=\"1\" to treats this error as warning.");
 	}
 } else {
-	G[PACKAGE_GUARD] = version;
+	G[PACKAGE_GUARD] = packageVersion;
 }
 
 import * as zxteam from "@zxteam/contract";
+import { SimpleCancellationTokenSource } from "@zxteam/cancellation";
 import { Initable, Disposable } from "@zxteam/disposable";
-import { Task } from "@zxteam/task";
 
 import * as express from "express";
 import * as fs from "fs";
@@ -631,7 +631,7 @@ export class WebSocketEndpoint extends ServersBindEndpoint implements WebSocketB
 		(webSocket as any).binaryProtocolAdapters = binaryProtocolAdapters;
 		(webSocket as any).textProtocolAdapters = textProtocolAdapters;
 
-		const cancellationTokenSource = Task.createCancellationTokenSource();
+		const cancellationTokenSource = new SimpleCancellationTokenSource();
 
 		webSocket.binaryType = "arraybuffer";
 		webSocket.onmessage = ({ data }) => {
@@ -799,10 +799,3 @@ function parseCertificates(certificates: Buffer | string | Array<string | Buffer
 		return certificates.map(parseCertificate);
 	}
 }
-
-const DUMMY_CANCELLATION_TOKEN: zxteam.CancellationToken = Object.freeze({
-	get isCancellationRequested() { return false; },
-	addCancelListener(cb: Function) { /***/ },
-	removeCancelListener(cb: Function) { /***/ },
-	throwIfCancellationRequested() { /***/ }
-});

@@ -1,12 +1,12 @@
 {
-	"name": "@zxteam/webserver",
-	"version": "6.0.1",
-	"description": "ZXTeam's WebServer (http.Server/https.Server wrapper)",
+	"name": "@zxteam/hosting",
+	"version": "6.0.7",
+	"description": "ZXTeam's Hosting Items like Web Server (http.Server/https.Server wrapper), WebSocket Server, endpoints, adapters.",
 	"main": "./src/index.js",
 	"types": "./src/index.d.ts",
 	"author": {
 		"name": "ZXTeam",
-		"email": "pub@project.zxteam.org",
+		"email": "pub@zxteam.org",
 		"url": "http://www.zxteam.org"
 	},
 	"contributors": [
@@ -27,11 +27,11 @@
 		"@zxteam/logger": "^6.0.1"
 	},
 	"dependencies": {
-		"@zxteam/contract": "^6.0.1",
-		"@zxteam/disposable": "^6.0.1",
-		"@zxteam/task": "^6.0.1",
+		"@zxteam/contract": "^6.0.7",
+		"@zxteam/disposable": "^6.0.7",
+		"@zxteam/cancellation": "^6.0.7",
 		"@types/express": "^4.17.0",
-		"@types/node": "^11.13.17",
+		"@types/node": "^11.13.18",
 		"@types/node-forge": "^0.8.4",
 		"@types/ws": "^6.0.1",
 		"express": "^4.17.1",
@@ -45,15 +45,16 @@
 	"keywords": [],
 	"repository": {
 		"type": "git",
-		"url": "ssh://git@dev.zxteam.net:22282/pub/node/webserver.git"
+		"url": "https://github.com/zxteamorg/node.hosting.git"
 	},
 	"bugs": {
-		"url": "https://dev.zxteam.net/pub/node/webserver/issues"
+		"url": "https://github.com/zxteamorg/node.hosting/issues"
 	},
-	"homepage": "https://dev.zxteam.net/pub/node/webserver",
+	"homepage": "https://github.com/zxteamorg/node.hosting",
 	"scripts": {
-		"build": "zxbuild clean dist",
-		"test": "nyc --exclude submodules --exclude test --reporter=lcov --reporter=text --reporter=text-summary mocha --recursive --timeout 10000 \"test/**/*.test.js\" || true"
+		"build": "zxbuild clean dist && cp README.md .dist/",
+		"test": "nyc --exclude submodules --exclude test --extension=\".ts\" --reporter=lcov --reporter=text --reporter=text-summary mocha \"test/**/*.test.js\" --recursive --timeout 10000 || true",
+		"test:only": "mocha --require source-map-support/register \"test/**/*.test.js\" --recursive --timeout 10000"
 	},
 	"private": true
 }
