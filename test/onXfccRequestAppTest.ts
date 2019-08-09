@@ -159,7 +159,7 @@ class TimerSubsciberChannel extends Disposable implements zxteam.SubscriberChann
 
 	private onTimer() {
 		const now = new Date();
-		this._handlers.forEach(h => h({ data: now }));
+		this._handlers.forEach(h => h(DUMMY_CANCELLATION_TOKEN, { data: now }));
 	}
 }
 
@@ -344,7 +344,7 @@ async function main() {
 		}
 	}
 
-	["SIGTERM", "SIGINT"].forEach((signal: NodeJS.Signals) => process.on(signal, () => gracefulShutdown(signal)));
+	(["SIGTERM", "SIGINT"] as Array<NodeJS.Signals>).forEach(signal => process.on(signal, () => gracefulShutdown(signal)));
 }
 
 main().catch(e => {

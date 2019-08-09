@@ -52,7 +52,7 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 	private readonly _onUpgrade: (request: http.IncomingMessage, socket: net.Socket, head: Buffer) => void;
 	private readonly _onRequestImpl: http.RequestListener;
 	private readonly _handlers: Map</*bindPath: */string, WebServerRequestHandler>;
-	private readonly _caCertificates: Array<[pki.Certificate, Buffer]>;
+	private readonly _caCertificates: ReadonlyArray<[pki.Certificate, Buffer]>;
 	private _rootExpressApplication: express.Application | null;
 
 	public constructor(opts: TOpts, log: zxteam.Logger) {
@@ -98,8 +98,12 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 					)
 				) {
 					this._caCertificates = parseCertificates(friendlyOpts.caCertificates);
+				} else {
+					this._caCertificates = [];
 				}
 			}
+		} else {
+			this._caCertificates = [];
 		}
 
 		this._onRequestImpl = onXfccRequest !== null ? onXfccRequest : this.onRequestCommon.bind(this);
