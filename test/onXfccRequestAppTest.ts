@@ -1,5 +1,5 @@
 import * as zxteam from "@zxteam/contract";
-import { loggerManager } from "@zxteam/logger";
+import { logger } from "@zxteam/logger";
 import { DUMMY_CANCELLATION_TOKEN } from "@zxteam/cancellation";
 
 import * as http from "http";
@@ -290,7 +290,7 @@ async function main() {
 		listenHost: "0.0.0.0",
 		listenPort: 8443,
 		name: "onXfccRequestAppTest Secured"
-	}, loggerManager.getLogger("Secured Server"));
+	}, logger.getLogger("Secured Server"));
 
 	server2 = new THE.UnsecuredWebServer({
 		// caCertificates: [Buffer.from(caCertificate1), Buffer.from(caCertificate2)],
@@ -299,7 +299,7 @@ async function main() {
 		listenHost: "0.0.0.0",
 		listenPort: 8440,
 		name: "onXfccRequestAppTest Unsecured"
-	}, loggerManager.getLogger("Unsecured Server"));
+	}, logger.getLogger("Unsecured Server"));
 
 	const restEndpoint = new MyRestEndpoint(
 		[server1, server2],
@@ -307,22 +307,22 @@ async function main() {
 		{
 			bindPath: "/"
 		},
-		loggerManager.getLogger("restEndpoint")
+		logger.getLogger("restEndpoint")
 	);
 
-	const wsEndpoint = new THE.WebSocketEndpoint(
+	const wsEndpoint = new THE.WebSocketAdapterEndpoint(
 		[server1, server2],
 		{
 			bindPath: "/ws",
 			defaultProtocol: "text"
 		},
-		loggerManager.getLogger("wsEndpoint")
+		logger.getLogger("wsEndpoint")
 	);
-	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter(ch, loggerManager.getLogger("MyTextProtocolAdapter")));
-	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter2(ch, loggerManager.getLogger("MyTextProtocolAdapter2")));
+	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter(ch, logger.getLogger("MyTextProtocolAdapter")));
+	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter2(ch, logger.getLogger("MyTextProtocolAdapter2")));
 
-	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter(ch, loggerManager.getLogger("MyBinaryProtocolAdapter")));
-	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter2(ch, loggerManager.getLogger("MyBinaryProtocolAdapter2")));
+	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter(ch, logger.getLogger("MyBinaryProtocolAdapter")));
+	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter2(ch, logger.getLogger("MyBinaryProtocolAdapter2")));
 
 	await restEndpoint.init(DUMMY_CANCELLATION_TOKEN);
 	await wsEndpoint.init(DUMMY_CANCELLATION_TOKEN);
