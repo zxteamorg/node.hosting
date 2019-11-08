@@ -43,7 +43,7 @@
 			"program": "${workspaceRoot}/test/onXfccRequestAppTest.js"
 		},
 		{
-			"name": "WebSocketChannelTest",
+			"name": "WebSocketChannelFactoryEndpointTest",
 			"type": "node",
 			"runtimeArgs": [
 				"--require",
@@ -55,9 +55,26 @@
 			"env": {
 				"NODE_ENV": "development",
 				"NODE_ALLOW_CONFLICT_MODULES": "1",
-				"LOG_LEVEL": "debug"
+				"LOG_LEVEL": "trace"
 			},
-			"program": "${workspaceRoot}/test/WebSocketChannelTest.js"
+			"program": "${workspaceRoot}/test/WebSocketChannelFactoryEndpointTest.js"
 		},
+		{
+			"name": "WebSocketChannelSupplyEndpointTest",
+			"type": "node",
+			"runtimeArgs": [
+				"--require",
+				"source-map-support/register",
+			],
+			"request": "launch",
+			"preLaunchTask": "compile:src:ts",
+			"cwd": "${workspaceRoot}",
+			"env": {
+				"NODE_ENV": "development",
+				"NODE_ALLOW_CONFLICT_MODULES": "1",
+				"LOG_LEVEL": "trace"
+			},
+			"program": "${workspaceRoot}/test/WebSocketChannelSupplyEndpointTest.js"
+		}
 	]
 }

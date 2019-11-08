@@ -446,9 +446,12 @@ export abstract class ServersBindEndpoint extends BindEndpoint {
 	}
 }
 
-export type WebSocketBinaryChannel = PublisherChannel<Uint8Array> & SubscriberChannel<Uint8Array>;
-export type WebSocketTextChannel = PublisherChannel<string> & SubscriberChannel<string>;
-export class WebSocketChannelsEndpoint extends ServersBindEndpoint {
+
+/**
+ * This endpoint supplies you communication channels for each client connection.
+ * Overrride onOpenBinaryChannel and/or onOpenTextChannel to catch neccesary channel
+ */
+export class WebSocketChannelSupplyEndpoint extends ServersBindEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
 	private readonly _connections: Set<WebSocket>;
 	private _defaultProtocol: string;
@@ -541,8 +544,8 @@ export class WebSocketChannelsEndpoint extends ServersBindEndpoint {
 		webSocket.binaryType = "nodebuffer";
 
 		const channels: Map</*protocol:*/ string, {
-			binaryChannel?: WebSocketChannelsEndpointHelpers.WebSocketBinaryChannelImpl,
-			textChannel?: WebSocketChannelsEndpointHelpers.WebSocketTextChannelImpl
+			binaryChannel?: WebSocketChannelSupplyEndpointHelpers.WebSocketBinaryChannelImpl,
+			textChannel?: WebSocketChannelSupplyEndpointHelpers.WebSocketTextChannelImpl
 		}> = new Map();
 
 		webSocket.onmessage = async ({ data }) => {
@@ -555,7 +558,7 @@ export class WebSocketChannelsEndpoint extends ServersBindEndpoint {
 
 				if (data instanceof Buffer) {
 					if (channelsTuple.binaryChannel === undefined) {
-						const binaryChannel = new WebSocketChannelsEndpointHelpers.WebSocketBinaryChannelImpl(webSocket);
+						const binaryChannel = new WebSocketChannelSupplyEndpointHelpers.WebSocketBinaryChannelImpl(webSocket);
 						try {
 							this.onOpenBinaryChannel(webSocket, subProtocol, binaryChannel);
 						} catch (e) {
@@ -569,7 +572,7 @@ export class WebSocketChannelsEndpoint extends ServersBindEndpoint {
 					await channelsTuple.binaryChannel.onMessage(cancellationTokenSource.token, data);
 				} else if (_.isString(data)) {
 					if (channelsTuple.textChannel === undefined) {
-						const textChannel = new WebSocketChannelsEndpointHelpers.WebSocketTextChannelImpl(webSocket);
+						const textChannel = new WebSocketChannelSupplyEndpointHelpers.WebSocketTextChannelImpl(webSocket);
 						try {
 							this.onOpenTextChannel(webSocket, subProtocol, textChannel);
 						} catch (e) {
@@ -638,7 +641,7 @@ export class WebSocketChannelsEndpoint extends ServersBindEndpoint {
 	 * depending on the specified protocol).
 	 * @param channel Binary channel instance to be user in inherited class
 	 */
-	protected onOpenBinaryChannel(webSocket: WebSocket, subProtocol: string, channel: WebSocketBinaryChannel): void {
+	protected onOpenBinaryChannel(webSocket: WebSocket, subProtocol: string, channel: WebSocketChannelSupplyEndpoint.BinaryChannel): void {
 		throw new InvalidOperationError(`Binary messages are not supported by the sub-protocol: ${subProtocol}`);
 	}
 
@@ -652,9 +655,253 @@ export class WebSocketChannelsEndpoint extends ServersBindEndpoint {
 	 * depending on the specified protocol).
 	 * @param channel Text channel instance to be user in inherited class
 	 */
-	protected onOpenTextChannel(webSocket: WebSocket, subProtocol: string, channel: WebSocketTextChannel): void {
+	protected onOpenTextChannel(webSocket: WebSocket, subProtocol: string, channel: WebSocketChannelSupplyEndpoint.TextChannel): void {
 		throw new InvalidOperationError(`Text messages are not supported by the sub-protocol: ${subProtocol}`);
 	}
+}
+export namespace WebSocketChannelSupplyEndpoint {
+	export interface BinaryChannel extends PublisherChannel<Uint8Array>, SubscriberChannel<Uint8Array> { }
+	export interface TextChannel extends PublisherChannel<string>, SubscriberChannel<string> { }
+}
+
+/**
+ * This endpoint requests you for communication channels for each client connection.
+ * Overrride createBinaryChannel and/or createTextChannel to prodice neccesary channel
+ */
+export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
+	private readonly _webSocketServers: Array<WebSocket.Server>;
+	private readonly _connections: Set<WebSocket>;
+	private _defaultProtocol: string;
+	private _allowedProtocols: Set<string>;
+	private _connectionCounter: number;
+
+	public constructor(
+		servers: ReadonlyArray<WebServer>,
+		opts: Configuration.WebSocketEndpoint,
+		log: Logger
+	) {
+		super(servers, opts, log);
+		this._webSocketServers = [];
+		this._connections = new Set();
+		this._defaultProtocol = opts.defaultProtocol;
+		this._allowedProtocols = new Set([this._defaultProtocol]);
+		if (opts.allowedProtocols !== undefined) {
+			opts.allowedProtocols.forEach((allowedProtocol: string): void => {
+				this._allowedProtocols.add(allowedProtocol);
+			});
+		}
+		this._connectionCounter = 0;
+	}
+
+	protected onInit(): void {
+		for (const server of this._servers) {
+			const webSocketServer = server.createWebSocketServer(this._bindPath); // new WebSocket.Server({ noServer: true });
+			this._webSocketServers.push(webSocketServer);
+			webSocketServer.on("connection", this.onConnection.bind(this));
+		}
+	}
+
+	protected async onDispose() {
+		const connections = [...this._connections.values()];
+		this._connections.clear();
+		for (const webSocket of connections) {
+			webSocket.close(1001, "going away");
+			webSocket.terminate();
+		}
+
+		const webSocketServers = this._webSocketServers.splice(0).reverse();
+		for (const webSocketServer of webSocketServers) {
+			await new Promise((resolve) => {
+				webSocketServer.close((err) => {
+					if (err !== undefined) {
+						if (this._log.isWarnEnabled) {
+							this._log.warn(`Web Socket Server was closed with error. Inner message: ${err.message} `);
+						}
+						this._log.trace("Web Socket Server was closed with error.", err);
+					}
+
+					// dispose never raise any errors
+					resolve();
+				});
+			});
+		}
+	}
+
+	protected onConnection(webSocket: WebSocket, request: http.IncomingMessage): void {
+		if (this.disposing) {
+			// https://tools.ietf.org/html/rfc6455#section-7.4.1
+			webSocket.close(1001, "going away");
+			webSocket.terminate();
+			return;
+		}
+
+		if (this._connectionCounter === Number.MAX_SAFE_INTEGER) { this._connectionCounter = 0; }
+		const connectionNumber: number = this._connectionCounter++;
+		const ipAddress: string | undefined = request.connection.remoteAddress;
+		if (ipAddress !== undefined && this._log.isTraceEnabled) {
+			this._log.trace(`Connection #${connectionNumber} was established from ${ipAddress} `);
+		}
+		if (this._log.isInfoEnabled) {
+			this._log.info(`Connection #${connectionNumber} was established`);
+		}
+
+		const subProtocol: string = webSocket.protocol || this._defaultProtocol;
+		if (webSocket.protocol !== undefined) {
+			if (!this._allowedProtocols.has(subProtocol)) {
+				this._log.warn(`Connection #${connectionNumber} dropped. Not supported sub-protocol: ${subProtocol}`);
+				// https://tools.ietf.org/html/rfc6455#section-7.4.1
+				webSocket.close(1007, `Wrong sub-protocol: ${subProtocol}`);
+				webSocket.terminate();
+				return;
+			}
+		}
+
+		const cancellationTokenSource = new ManualCancellationTokenSource();
+
+		webSocket.binaryType = "nodebuffer";
+
+		const channels: Map</*protocol:*/ string, {
+			binaryChannel?: WebSocketChannelFactoryEndpoint.BinaryChannel,
+			textChannel?: WebSocketChannelFactoryEndpoint.TextChannel
+		}> = new Map();
+
+		const handler = async (
+			cancellationToken: CancellationToken,
+			event: SubscriberChannel.Event<Uint8Array> | SubscriberChannel.Event<string> | Error
+		) => {
+			if (event instanceof Error) {
+				// https://tools.ietf.org/html/rfc6455#section-7.4.1
+				this._log.debug("Channel emits error.", event.message);
+				this._log.trace("Channel emits error.", event);
+				webSocket.close(1011, event.message);
+				webSocket.terminate();
+			} else {
+				const { data } = event;
+				await new Promise(sendResolve => webSocket.send(data, () => sendResolve()));
+			}
+		};
+
+		webSocket.onmessage = async ({ data }) => {
+			try {
+				let channelsTuple = channels.get(subProtocol);
+				if (channelsTuple === undefined) {
+					channelsTuple = {};
+					channels.set(subProtocol, channelsTuple);
+				}
+
+				if (data instanceof Buffer) {
+					if (channelsTuple.binaryChannel === undefined) {
+						try {
+							const binaryChannel: WebSocketChannelFactoryEndpoint.BinaryChannel
+								= await this.createBinaryChannel(webSocket, subProtocol);
+							channelsTuple.binaryChannel = binaryChannel;
+							binaryChannel.addHandler(handler);
+						} catch (e) {
+							// https://tools.ietf.org/html/rfc6455#section-7.4.1
+							const friendlyError: Error = wrapErrorIfNeeded(e);
+							this._log.debug("Could not create binary channel.", friendlyError.message);
+							this._log.trace("Could not create binary channel.", friendlyError);
+							webSocket.close(1011, friendlyError.message);
+							webSocket.terminate();
+							return;
+						}
+					}
+					await channelsTuple.binaryChannel.send(cancellationTokenSource.token, data);
+				} else if (_.isString(data)) {
+					if (channelsTuple.textChannel === undefined) {
+						try {
+							const textChannel: WebSocketChannelFactoryEndpoint.TextChannel
+								= await this.createTextChannel(webSocket, subProtocol);
+							channelsTuple.textChannel = textChannel;
+							textChannel.addHandler(handler);
+						} catch (e) {
+							// https://tools.ietf.org/html/rfc6455#section-7.4.1
+							const friendlyError: Error = wrapErrorIfNeeded(e);
+							this._log.debug("Could not create text channel.", friendlyError.message);
+							this._log.trace("Could not create text channel.", friendlyError);
+							webSocket.close(1011, friendlyError.message);
+							webSocket.terminate();
+							return;
+						}
+
+					}
+					await channelsTuple.textChannel.send(cancellationTokenSource.token, data);
+				} else {
+					if (this._log.isDebugEnabled) {
+						this._log.debug(
+							`Connection #${connectionNumber} cannot handle a message due not supported type. Terminate socket...`
+						);
+					}
+					// https://tools.ietf.org/html/rfc6455#section-7.4.1
+					webSocket.close(1003, `Not supported message type`);
+					webSocket.terminate();
+					return;
+				}
+			} catch (e) {
+				if (this._log.isInfoEnabled) {
+					this._log.info(`Connection #${connectionNumber} onMessage failed: ${e.message}`);
+				}
+				if (this._log.isTraceEnabled) {
+					this._log.trace(`Connection #${connectionNumber} onMessage failed:`, e);
+				}
+			}
+		};
+		webSocket.onclose = ({ code, reason }) => {
+			if (this._log.isTraceEnabled) {
+				this._log.trace(`Connection #${connectionNumber} was closed: ${JSON.stringify({ code, reason })} `);
+			}
+			if (this._log.isInfoEnabled) {
+				this._log.info(`Connection #${connectionNumber} was closed`);
+			}
+
+			cancellationTokenSource.cancel();
+			this._connections.delete(webSocket);
+
+			for (const channelsTuple of channels.values()) {
+				if (channelsTuple.binaryChannel !== undefined) {
+					channelsTuple.binaryChannel.removeHandler(handler);
+					channelsTuple.binaryChannel.dispose().catch(console.error);
+				}
+				if (channelsTuple.textChannel !== undefined) {
+					channelsTuple.textChannel.removeHandler(handler);
+					channelsTuple.textChannel.dispose().catch(console.error);
+				}
+			}
+			channels.clear();
+		};
+
+		this._connections.add(webSocket);
+	}
+
+	/**
+	 * The method should be overriden. The method called by the endpoint,
+	 * when WSClient sent first binary message for specified sub-protocol.
+	 * @param webSocket WebSocket instance
+	 * @param subProtocol These strings are used to indicate sub-protocols,
+	 * so that a single server can implement multiple WebSocket sub-protocols (for example,
+	 * you might want one server to be able to handle different types of interactions
+	 * depending on the specified protocol).
+	 */
+	protected createBinaryChannel(webSocket: WebSocket, subProtocol: string): Promise<WebSocketChannelFactoryEndpoint.BinaryChannel> {
+		throw new InvalidOperationError(`Binary messages are not supported by the sub-protocol: ${subProtocol}`);
+	}
+
+	/**
+	 * The method should be overriden. The method called by the endpoint,
+	 * when WSClient sent first text message for specified sub-protocol.
+	 * @param webSocket WebSocket instance
+	 * @param subProtocol These strings are used to indicate sub-protocols,
+	 * so that a single server can implement multiple WebSocket sub-protocols (for example,
+	 * you might want one server to be able to handle different types of interactions
+	 * depending on the specified protocol).
+	 */
+	protected createTextChannel(webSocket: WebSocket, subProtocol: string): Promise<WebSocketChannelFactoryEndpoint.TextChannel> {
+		throw new InvalidOperationError(`Text messages are not supported by the sub-protocol: ${subProtocol}`);
+	}
+}
+export namespace WebSocketChannelFactoryEndpoint {
+	export interface BinaryChannel extends Disposable, PublisherChannel<Uint8Array>, SubscriberChannel<Uint8Array> { }
+	export interface TextChannel extends Disposable, PublisherChannel<string>, SubscriberChannel<string> { }
 }
 
 export function instanceofWebServer(server: any): server is WebServer {
@@ -719,7 +966,7 @@ function parseCertificates(certificates: Buffer | string | Array<string | Buffer
 	}
 }
 
-namespace WebSocketChannelsEndpointHelpers {
+namespace WebSocketChannelSupplyEndpointHelpers {
 	export class WebSocketChannelBase<TData> {
 		protected readonly _webSocket: WebSocket;
 		protected readonly _callbacks: Array<SubscriberChannel.Callback<TData>>;
@@ -800,6 +1047,8 @@ namespace WebSocketChannelsEndpointHelpers {
 			return new Promise(sendResolve => this._webSocket.send(data, () => sendResolve()));
 		}
 	}
-	export class WebSocketBinaryChannelImpl extends WebSocketChannelBase<Uint8Array> implements WebSocketBinaryChannel { }
-	export class WebSocketTextChannelImpl extends WebSocketChannelBase<string> implements WebSocketTextChannel { }
+	export class WebSocketBinaryChannelImpl extends WebSocketChannelBase<Uint8Array>
+		implements WebSocketChannelSupplyEndpoint.BinaryChannel { }
+	export class WebSocketTextChannelImpl extends WebSocketChannelBase<string>
+		implements WebSocketChannelSupplyEndpoint.TextChannel { }
 }

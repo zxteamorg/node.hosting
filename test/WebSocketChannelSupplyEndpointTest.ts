@@ -7,8 +7,8 @@ import * as WebSocket from "ws";
 
 import * as THE from "../src/index";
 
-class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelsEndpoint {
-	protected onOpenBinaryChannel(webSocket: WebSocket, subProtocol: string, channel: THE.WebSocketBinaryChannel) {
+class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelSupplyEndpoint {
+	protected onOpenBinaryChannel(webSocket: WebSocket, subProtocol: string, channel: THE.WebSocketChannelSupplyEndpoint.BinaryChannel) {
 		let timer: NodeJS.Timeout | null = null;
 		let echoMessage: string;
 		const messageHandler = (cancellationToken: CancellationToken, event: SubscriberChannel.Event<Uint8Array> | Error) => {
@@ -41,7 +41,7 @@ class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelsEndpoint {
 		};
 		channel.addHandler(messageHandler);
 	}
-	protected onOpenTextChannel(webSocket: WebSocket, subProtocol: string, channel: THE.WebSocketTextChannel) {
+	protected onOpenTextChannel(webSocket: WebSocket, subProtocol: string, channel: THE.WebSocketChannelSupplyEndpoint.TextChannel) {
 		let timer: NodeJS.Timeout | null = null;
 		let echoMessage: string;
 		const messageHandler = (cancellationToken: CancellationToken, event: SubscriberChannel.Event<string> | Error) => {
