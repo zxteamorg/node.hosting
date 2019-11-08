@@ -1,6 +1,6 @@
 {
 	"name": "@zxteam/hosting",
-	"version": "6.0.22",
+	"version": "6.0.28",
 	"description": "ZXTeam's Hosting Items like Web Server (http.Server/https.Server wrapper), WebSocket Server, endpoints, adapters.",
 	"main": "./src/index.js",
 	"types": "./src/index.d.ts",
@@ -22,23 +22,23 @@
 	],
 	"license": "MIT",
 	"devDependencies": {
-		"@types/lodash": "^4.14.141",
+		"@types/lodash": "^4.14.145",
 		"@zxnode/build": "^0.0.34",
-		"@zxteam/logger": "^6.0.21"
+		"@zxteam/logger": "^6.0.22"
 	},
 	"dependencies": {
 		"@types/express": "^4.17.1",
-		"@types/node": "^11.13.21",
-		"@types/node-forge": "^0.8.6",
+		"@types/node": "^11.15.2",
+		"@types/node-forge": "^0.8.7",
 		"@types/ws": "^6.0.3",
-		"@zxteam/cancellation": "^6.0.18",
-		"@zxteam/contract": "^6.0.21",
-		"@zxteam/disposable": "^6.0.18",
-		"@zxteam/errors": "^6.0.18",
+		"@zxteam/cancellation": "^6.0.25",
+		"@zxteam/contract": "^6.0.28",
+		"@zxteam/disposable": "^6.0.23",
+		"@zxteam/errors": "^6.0.21",
 		"express": "^4.17.1",
 		"lodash": "^4.17.15",
 		"node-forge": "^0.9.1",
-		"ws": "^7.1.2"
+		"ws": "^7.2.0"
 	},
 	"engines": {
 		"node": ">=11"

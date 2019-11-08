@@ -165,7 +165,7 @@ class TimerSubsciberChannel extends Disposable implements zxteam.SubscriberChann
 
 const subscriptionChannel = new TimerSubsciberChannel(250);
 
-class MyRestEndpoint extends THE.RestEndpoint<undefined> {
+class MyRestEndpoint extends THE.ServersBindEndpoint {
 	protected onInit(): void {
 		this._servers.map(server => {
 			server.bindRequestHandler("/", this._helloWorldHandler.bind(this));
@@ -211,72 +211,72 @@ class SubsciberHandle {
 	}
 }
 
-class MyTextProtocolAdapter extends THE.AbstractProtocolAdapter<string> {
-	private readonly _subscribers: Map<string, SubsciberHandle>;
+// class MyTextProtocolAdapter extends THE.AbstractProtocolAdapter<string> {
+// 	private readonly _subscribers: Map<string, SubsciberHandle>;
 
-	public constructor(callbackChannel: THE.ProtocolAdapter.CallbackChannel<string>, log: zxteam.Logger) {
-		super(callbackChannel, log);
-		this._subscribers = new Map();
-	}
+// 	public constructor(callbackChannel: THE.ProtocolAdapter.CallbackChannel<string>, log: zxteam.Logger) {
+// 		super(callbackChannel, log);
+// 		this._subscribers = new Map();
+// 	}
 
-	public handleMessage(
-		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapter.Next<string>
-	) {
-		if (data === "Hello") {
-			return Promise.resolve("World!!!");
-		} else if (data === "subscribe") {
-			const handle = new SubsciberHandle(subscriptionChannel, this._callbackChannel);
-			this._subscribers.set(handle.token, handle);
-		}
+// 	public handleMessage(
+// 		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapter.Next<string>
+// 	) {
+// 		if (data === "Hello") {
+// 			return Promise.resolve("World!!!");
+// 		} else if (data === "subscribe") {
+// 			const handle = new SubsciberHandle(subscriptionChannel, this._callbackChannel);
+// 			this._subscribers.set(handle.token, handle);
+// 		}
 
-		if (next !== undefined) {
-			return next(ct, data);
-		}
-		return Promise.reject(new Error("Next was not provided"));
-	}
+// 		if (next !== undefined) {
+// 			return next(ct, data);
+// 		}
+// 		return Promise.reject(new Error("Next was not provided"));
+// 	}
 
-	protected onDispose() {
-		for (const s of this._subscribers.values()) {
-			s.destroy();
-		}
-		this._subscribers.clear();
-	}
-}
-class MyTextProtocolAdapter2 extends THE.AbstractProtocolAdapter<string> {
-	public handleMessage(
-		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapter.Next<string>
-	) {
-		return Promise.resolve(data);
-	}
-	protected onDispose() {
-		//nop
-	}
-}
+// 	protected onDispose() {
+// 		for (const s of this._subscribers.values()) {
+// 			s.destroy();
+// 		}
+// 		this._subscribers.clear();
+// 	}
+// }
+// class MyTextProtocolAdapter2 extends THE.AbstractProtocolAdapter<string> {
+// 	public handleMessage(
+// 		ct: zxteam.CancellationToken, data: string, next?: THE.ProtocolAdapter.Next<string>
+// 	) {
+// 		return Promise.resolve(data);
+// 	}
+// 	protected onDispose() {
+// 		//nop
+// 	}
+// }
 
-class MyBinaryProtocolAdapter extends THE.AbstractProtocolAdapter<ArrayBuffer> {
-	public handleMessage(
-		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapter.Next<ArrayBuffer>
-	) {
-		if (next !== undefined) {
-			return next(ct, data);
-		}
-		return Promise.reject(new Error("Next was not provided"));
-	}
+// class MyBinaryProtocolAdapter extends THE.AbstractProtocolAdapter<ArrayBuffer> {
+// 	public handleMessage(
+// 		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapter.Next<ArrayBuffer>
+// 	) {
+// 		if (next !== undefined) {
+// 			return next(ct, data);
+// 		}
+// 		return Promise.reject(new Error("Next was not provided"));
+// 	}
 
-	protected onDispose() {
-		//nop
-	}
-}
-class MyBinaryProtocolAdapter2 extends THE.AbstractProtocolAdapter<ArrayBuffer> {
-	public handleMessage(
-		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapter.Next<ArrayBuffer>
-	) {
-		return Promise.resolve(data);
-	}
-	protected onDispose() {
-		//nop
-	}
-}
+// 	protected onDispose() {
+// 		//nop
+// 	}
+// }
+// class MyBinaryProtocolAdapter2 extends THE.AbstractProtocolAdapter<ArrayBuffer> {
+// 	public handleMessage(
+// 		ct: zxteam.CancellationToken, data: ArrayBuffer, next?: THE.ProtocolAdapter.Next<ArrayBuffer>
+// 	) {
+// 		return Promise.resolve(data);
+// 	}
+// 	protected onDispose() {
+// 		//nop
+// 	}
+// }
 
 async function main() {
 
@@ -303,29 +303,28 @@ async function main() {
 
 	const restEndpoint = new MyRestEndpoint(
 		[server1, server2],
-		undefined,
 		{
 			bindPath: "/"
 		},
 		logger.getLogger("restEndpoint")
 	);
 
-	const wsEndpoint = new THE.WebSocketAdapterEndpoint(
-		[server1, server2],
-		{
-			bindPath: "/ws",
-			defaultProtocol: "text"
-		},
-		logger.getLogger("wsEndpoint")
-	);
-	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter(ch, logger.getLogger("MyTextProtocolAdapter")));
-	wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter2(ch, logger.getLogger("MyTextProtocolAdapter2")));
+	// const wsEndpoint = new THE.WebSocketAdapterEndpoint(
+	// 	[server1, server2],
+	// 	{
+	// 		bindPath: "/ws",
+	// 		defaultProtocol: "text"
+	// 	},
+	// 	logger.getLogger("wsEndpoint")
+	// );
+	// wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter(ch, logger.getLogger("MyTextProtocolAdapter")));
+	// wsEndpoint.useTextAdapter("text", (ch) => new MyTextProtocolAdapter2(ch, logger.getLogger("MyTextProtocolAdapter2")));
 
-	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter(ch, logger.getLogger("MyBinaryProtocolAdapter")));
-	wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter2(ch, logger.getLogger("MyBinaryProtocolAdapter2")));
+	// wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter(ch, logger.getLogger("MyBinaryProtocolAdapter")));
+	// wsEndpoint.useBinaryAdapter("bin", (ch) => new MyBinaryProtocolAdapter2(ch, logger.getLogger("MyBinaryProtocolAdapter2")));
 
 	await restEndpoint.init(DUMMY_CANCELLATION_TOKEN);
-	await wsEndpoint.init(DUMMY_CANCELLATION_TOKEN);
+	//await wsEndpoint.init(DUMMY_CANCELLATION_TOKEN);
 
 	await server1.init(DUMMY_CANCELLATION_TOKEN);
 	await server2.init(DUMMY_CANCELLATION_TOKEN);
@@ -334,7 +333,7 @@ async function main() {
 	async function gracefulShutdown(signal: string) {
 		if (destroyRequestCount++ === 0) {
 			console.log(`Interrupt signal received: ${signal}`);
-			await wsEndpoint.dispose();
+			//await wsEndpoint.dispose();
 			await restEndpoint.dispose();
 			await server2.dispose();
 			await server1.dispose();

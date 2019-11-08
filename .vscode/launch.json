@@ -42,5 +42,22 @@
 			},
 			"program": "${workspaceRoot}/test/onXfccRequestAppTest.js"
 		},
+		{
+			"name": "WebSocketChannelTest",
+			"type": "node",
+			"runtimeArgs": [
+				"--require",
+				"source-map-support/register",
+			],
+			"request": "launch",
+			"preLaunchTask": "compile:src:ts",
+			"cwd": "${workspaceRoot}",
+			"env": {
+				"NODE_ENV": "development",
+				"NODE_ALLOW_CONFLICT_MODULES": "1",
+				"LOG_LEVEL": "debug"
+			},
+			"program": "${workspaceRoot}/test/WebSocketChannelTest.js"
+		},
 	]
 }

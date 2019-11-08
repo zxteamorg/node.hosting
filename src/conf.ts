@@ -88,21 +88,22 @@ export namespace Configuration {
 
 	export interface WebSocketEndpoint extends BindEndpoint {
 		readonly defaultProtocol: string;
+		readonly allowedProtocols?: ReadonlyArray<string>;
 	}
 
 	export function parseWebServer(configuration: zxteam.Configuration, serverName: string): WebServer {
 		const serverType = configuration.getString("type");
 		switch (serverType) {
 			case "http": {
+				let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
+				if (configuration.hasKey("trustProxy")) {
+					trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
+				}
+
 				if (configuration.hasKey("clientCertificateMode")) {
 					const clientCertificateMode = configuration.getString("clientCertificateMode");
 					if (clientCertificateMode !== Configuration.ClientCertificateMode.XFCC) {
 						throw new Error(`Unsupported value for clientCertificateMode: ${clientCertificateMode}`);
-					}
-
-					let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
-					if (configuration.hasKey("trustProxy")) {
-						trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
 					}
 
 					const serverOpts: UnsecuredXfccWebServer = {
@@ -112,16 +113,11 @@ export namespace Configuration {
 						listenPort: configuration.getInteger("listenPort"),
 						trustProxy,
 						clientCertificateMode,
-						caCertificates: configuration.getString("caCertificates")
+						caCertificates: configuration.getString("caCertificates") // caCertificates requires for validate client certificates
 					};
 
 					return serverOpts;
 				} else {
-					let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
-					if (configuration.hasKey("trustProxy")) {
-						trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
-					}
-
 					const serverOpts: UnsecuredCommonWebServer = {
 						type: serverType,
 						name: serverName,
