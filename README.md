@@ -5,6 +5,12 @@
 [![last commit badge](https://img.shields.io/github/last-commit/zxteamorg/node.hosting)](https://github.com/zxteamorg/node.hosting/graphs/commit-activity)
 [![twitter badge](https://img.shields.io/twitter/follow/zxteamorg?style=social&logo=twitter)](https://twitter.com/zxteamorg)
 
+## Usage
+### WebSockets
+There two endpoints:
+* `WebSocketChannelFactoryEndpoint` - this endpoint request your channel implementation (you should provide a channel and be channel's server)
+* `WebSocketChannelSupplyEndpoint` - this endpoint provides a channel (you use channel as client)
+
 ## Configuration
 ### Web servers
 #### Keys

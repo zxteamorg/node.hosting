@@ -96,11 +96,11 @@ export namespace Configuration {
 		switch (serverType) {
 			case "http": {
 				let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
-				if (configuration.hasKey("trustProxy")) {
+				if (configuration.has("trustProxy")) {
 					trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
 				}
 
-				if (configuration.hasKey("clientCertificateMode")) {
+				if (configuration.has("clientCertificateMode")) {
 					const clientCertificateMode = configuration.getString("clientCertificateMode");
 					if (clientCertificateMode !== Configuration.ClientCertificateMode.XFCC) {
 						throw new Error(`Unsupported value for clientCertificateMode: ${clientCertificateMode}`);
@@ -133,12 +133,12 @@ export namespace Configuration {
 				let serverOpts: SecuredWebServer;
 
 				let trustProxy: boolean | "loopback" | "linklocal" | "uniquelocal" | undefined = undefined;
-				if (configuration.hasKey("trustProxy")) {
+				if (configuration.has("trustProxy")) {
 					trustProxy = Configuration.parseTrustProxy(configuration.getString("trustProxy"));
 				}
 
 				let serverKeyPassword: string | undefined = undefined;
-				if (configuration.hasKey("serverKeyPassword")) {
+				if (configuration.has("serverKeyPassword")) {
 					serverKeyPassword = configuration.getString("serverKeyPassword");
 				}
 
@@ -147,7 +147,7 @@ export namespace Configuration {
 				switch (clientCertMode) {
 					case ClientCertificateMode.NONE:
 					case ClientCertificateMode.REQUEST:
-						if (configuration.hasKey("caCertificates")) {
+						if (configuration.has("caCertificates")) {
 							serverOpts = {
 								type: serverType,
 								name: serverName,

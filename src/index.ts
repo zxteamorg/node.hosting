@@ -793,7 +793,7 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 					if (channelsTuple.binaryChannel === undefined) {
 						try {
 							const binaryChannel: WebSocketChannelFactoryEndpoint.BinaryChannel
-								= await this.createBinaryChannel(webSocket, subProtocol);
+								= await this.createBinaryChannel(cancellationTokenSource.token, webSocket, subProtocol);
 							channelsTuple.binaryChannel = binaryChannel;
 							binaryChannel.addHandler(handler);
 						} catch (e) {
@@ -811,7 +811,7 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 					if (channelsTuple.textChannel === undefined) {
 						try {
 							const textChannel: WebSocketChannelFactoryEndpoint.TextChannel
-								= await this.createTextChannel(webSocket, subProtocol);
+								= await this.createTextChannel(cancellationTokenSource.token, webSocket, subProtocol);
 							channelsTuple.textChannel = textChannel;
 							textChannel.addHandler(handler);
 						} catch (e) {
@@ -882,7 +882,9 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 	 * you might want one server to be able to handle different types of interactions
 	 * depending on the specified protocol).
 	 */
-	protected createBinaryChannel(webSocket: WebSocket, subProtocol: string): Promise<WebSocketChannelFactoryEndpoint.BinaryChannel> {
+	protected createBinaryChannel(
+		cancellationToken: CancellationToken, webSocket: WebSocket, subProtocol: string
+	): Promise<WebSocketChannelFactoryEndpoint.BinaryChannel> {
 		throw new InvalidOperationError(`Binary messages are not supported by the sub-protocol: ${subProtocol}`);
 	}
 
@@ -895,7 +897,9 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 	 * you might want one server to be able to handle different types of interactions
 	 * depending on the specified protocol).
 	 */
-	protected createTextChannel(webSocket: WebSocket, subProtocol: string): Promise<WebSocketChannelFactoryEndpoint.TextChannel> {
+	protected createTextChannel(
+		cancellationToken: CancellationToken, webSocket: WebSocket, subProtocol: string
+	): Promise<WebSocketChannelFactoryEndpoint.TextChannel> {
 		throw new InvalidOperationError(`Text messages are not supported by the sub-protocol: ${subProtocol}`);
 	}
 }

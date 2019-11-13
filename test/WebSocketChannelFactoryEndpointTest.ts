@@ -134,11 +134,15 @@ class TextEchoChannel extends Disposable implements THE.WebSocketChannelSupplyEn
 }
 
 class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelFactoryEndpoint {
-	protected async createBinaryChannel(webSocket: WebSocket, subProtocol: string): Promise<BinaryEchoChannel> {
+	protected async createBinaryChannel(
+		cancellationToken: CancellationToken, webSocket: WebSocket, subProtocol: string
+	): Promise<BinaryEchoChannel> {
 		await sleep(250);
 		return new BinaryEchoChannel(500, subProtocol);
 	}
-	protected async createTextChannel(webSocket: WebSocket, subProtocol: string): Promise<TextEchoChannel> {
+	protected async createTextChannel(
+		cancellationToken: CancellationToken, webSocket: WebSocket, subProtocol: string
+	): Promise<TextEchoChannel> {
 		await sleep(250);
 		return new TextEchoChannel(500, subProtocol);
 	}
