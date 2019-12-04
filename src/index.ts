@@ -691,6 +691,8 @@ export namespace WebSocketChannelSupplyEndpoint {
 export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
 	private readonly _connections: Set<WebSocket>;
+	private readonly _autoCreateChannelBinary: boolean;
+	private readonly _autoCreateChannelText: boolean;
 	private _defaultProtocol: string;
 	private _allowedProtocols: Set<string>;
 	private _connectionCounter: number;
@@ -698,7 +700,11 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 	public constructor(
 		servers: ReadonlyArray<WebServer>,
 		opts: Configuration.WebSocketEndpoint,
-		log: Logger
+		log: Logger,
+		autoCreateChannels?: {
+			binary?: boolean,
+			text?: boolean
+		}
 	) {
 		super(servers, opts, log);
 		this._webSocketServers = [];
@@ -711,6 +717,14 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 			});
 		}
 		this._connectionCounter = 0;
+
+		this._autoCreateChannelBinary = false;
+		this._autoCreateChannelText = false;
+
+		if (autoCreateChannels !== undefined) {
+			if (autoCreateChannels.binary === true) { this._autoCreateChannelBinary = true; }
+			if (autoCreateChannels.text === true) { this._autoCreateChannelText = true; }
+		}
 	}
 
 	protected onInit(): void {
@@ -736,7 +750,7 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 		this._webSocketServers.splice(0);
 	}
 
-	protected onConnection(webSocket: WebSocket, request: http.IncomingMessage): void {
+	protected async onConnection(webSocket: WebSocket, request: http.IncomingMessage): Promise<void> {
 		if (this.disposing) {
 			// https://tools.ietf.org/html/rfc6455#section-7.4.1
 			webSocket.close(1001, "going away");
@@ -789,6 +803,50 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 			}
 		};
 
+		if (this._autoCreateChannelBinary === true) {
+			let channelsTuple = channels.get(subProtocol);
+			if (channelsTuple === undefined) {
+				channelsTuple = {};
+				channels.set(subProtocol, channelsTuple);
+			}
+			try {
+				const binaryChannel: WebSocketChannelFactoryEndpoint.BinaryChannel
+					= await this.createBinaryChannel(cancellationTokenSource.token, webSocket, subProtocol);
+				channelsTuple.binaryChannel = binaryChannel;
+				binaryChannel.addHandler(handler);
+			} catch (e) {
+				// https://tools.ietf.org/html/rfc6455#section-7.4.1
+				const friendlyError: Error = wrapErrorIfNeeded(e);
+				this._log.debug("Could not create binary channel.", friendlyError.message);
+				this._log.trace("Could not create binary channel.", friendlyError);
+				webSocket.close(1011, friendlyError.message);
+				webSocket.terminate();
+				return;
+			}
+		}
+
+		if (this._autoCreateChannelText === true) {
+			let channelsTuple = channels.get(subProtocol);
+			if (channelsTuple === undefined) {
+				channelsTuple = {};
+				channels.set(subProtocol, channelsTuple);
+			}
+			try {
+				const textChannel: WebSocketChannelFactoryEndpoint.TextChannel
+					= await this.createTextChannel(cancellationTokenSource.token, webSocket, subProtocol);
+				channelsTuple.textChannel = textChannel;
+				textChannel.addHandler(handler);
+			} catch (e) {
+				// https://tools.ietf.org/html/rfc6455#section-7.4.1
+				const friendlyError: Error = wrapErrorIfNeeded(e);
+				this._log.debug("Could not create text channel.", friendlyError.message);
+				this._log.trace("Could not create text channel.", friendlyError);
+				webSocket.close(1011, friendlyError.message);
+				webSocket.terminate();
+				return;
+			}
+		}
+
 		webSocket.onmessage = async ({ data }) => {
 			try {
 				let channelsTuple = channels.get(subProtocol);
@@ -831,7 +889,6 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 							webSocket.terminate();
 							return;
 						}
-
 					}
 					await channelsTuple.textChannel.send(cancellationTokenSource.token, data);
 				} else {
