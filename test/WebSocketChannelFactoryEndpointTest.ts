@@ -60,7 +60,7 @@ class BinaryEchoChannel extends Disposable implements THE.WebSocketChannelSupply
 
 	private onTimer() {
 		const now = new Date();
-		this._handlers.forEach(h => h(DUMMY_CANCELLATION_TOKEN, {
+		this._handlers.forEach(h => h({
 			data: Buffer.from(JSON.stringify({
 				subProtocol: this._subProtocol,
 				format: "text",
@@ -122,7 +122,7 @@ class TextEchoChannel extends Disposable implements THE.WebSocketChannelSupplyEn
 
 	private onTimer() {
 		const now = new Date();
-		this._handlers.forEach(h => h(DUMMY_CANCELLATION_TOKEN, {
+		this._handlers.forEach(h => h({
 			data: JSON.stringify({
 				subProtocol: this._subProtocol,
 				format: "text",

@@ -11,7 +11,7 @@ class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelSupplyEndpoint {
 	protected onOpenBinaryChannel(webSocket: WebSocket, subProtocol: string, channel: THE.WebSocketChannelSupplyEndpoint.BinaryChannel) {
 		let timer: NodeJS.Timeout | null = null;
 		let echoMessage: string;
-		const messageHandler = (cancellationToken: CancellationToken, event: SubscriberChannel.Event<Uint8Array> | Error) => {
+		const messageHandler = (event: SubscriberChannel.Event<Uint8Array> | Error) => {
 			if (event instanceof Error) {
 				if (timer !== null) {
 					clearTimeout(timer);
@@ -28,7 +28,7 @@ class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelSupplyEndpoint {
 					if (timer === null) {
 						timer = setInterval(() => {
 							const now = new Date();
-							channel.send(cancellationToken, Buffer.from(JSON.stringify({
+							channel.send(DUMMY_CANCELLATION_TOKEN, Buffer.from(JSON.stringify({
 								subProtocol,
 								format: "binary",
 								data: now.toISOString(),
@@ -44,7 +44,7 @@ class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelSupplyEndpoint {
 	protected onOpenTextChannel(webSocket: WebSocket, subProtocol: string, channel: THE.WebSocketChannelSupplyEndpoint.TextChannel) {
 		let timer: NodeJS.Timeout | null = null;
 		let echoMessage: string;
-		const messageHandler = (cancellationToken: CancellationToken, event: SubscriberChannel.Event<string> | Error) => {
+		const messageHandler = (event: SubscriberChannel.Event<string> | Error) => {
 			if (event instanceof Error) {
 				if (timer !== null) {
 					clearTimeout(timer);
@@ -60,7 +60,7 @@ class TestWebSocketChannelsEndpoint extends THE.WebSocketChannelSupplyEndpoint {
 					if (timer === null) {
 						timer = setInterval(() => {
 							const now = new Date();
-							channel.send(cancellationToken, JSON.stringify({
+							channel.send(DUMMY_CANCELLATION_TOKEN, JSON.stringify({
 								subProtocol,
 								format: "text",
 								data: now.toISOString(),

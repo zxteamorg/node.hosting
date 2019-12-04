@@ -159,7 +159,7 @@ class TimerSubsciberChannel extends Disposable implements zxteam.SubscriberChann
 
 	private onTimer() {
 		const now = new Date();
-		this._handlers.forEach(h => h(DUMMY_CANCELLATION_TOKEN, { data: now }));
+		this._handlers.forEach(h => h({ data: now }));
 	}
 }
 
@@ -202,12 +202,12 @@ class SubsciberHandle {
 		this._timerSubsciberChannel.removeHandler(this._event);
 	}
 
-	private onEvent(cancellationToken: zxteam.CancellationToken, ev: zxteam.SubscriberChannel.Event<Date> | Error): void {
+	private onEvent(ev: zxteam.SubscriberChannel.Event<Date> | Error): void {
 		if (ev instanceof Error) {
-			this._publisherChannel.send(cancellationToken, `[${this._token}] Failed: ${ev.message}`);
+			this._publisherChannel.send(DUMMY_CANCELLATION_TOKEN, `[${this._token}] Failed: ${ev.message}`);
 			return;
 		}
-		this._publisherChannel.send(cancellationToken, `[${this._token}] Now: ${ev.data}`);
+		this._publisherChannel.send(DUMMY_CANCELLATION_TOKEN, `[${this._token}] Now: ${ev.data}`);
 	}
 }
 

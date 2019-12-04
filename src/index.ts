@@ -42,6 +42,7 @@ export interface WebServer extends Initable {
 	rootExpressApplication: express.Application;
 	bindRequestHandler(bindPath: string, handler: WebServerRequestHandler): void;
 	createWebSocketServer(bindPath: string): WebSocket.Server;
+	destroyWebSocketServer(bindPath: string): Promise<void>;
 }
 
 export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBase | Configuration.WebServer>
@@ -146,6 +147,25 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 		const websocketServer: WebSocket.Server = new WebSocket.Server({ noServer: true });
 		this._websockets[bindPath] = websocketServer;
 		return websocketServer;
+	}
+	public async destroyWebSocketServer(bindPath: string): Promise<void> {
+		const webSocketServer = this._websockets[bindPath];
+		if (webSocketServer !== undefined) {
+			delete this._websockets[bindPath];
+			await new Promise((resolve) => {
+				webSocketServer.close((err) => {
+					if (err !== undefined) {
+						if (this._log.isWarnEnabled) {
+							this._log.warn(`Web Socket Server was closed with error. Inner message: ${err.message} `);
+						}
+						this._log.trace("Web Socket Server was closed with error.", err);
+					}
+
+					// dispose never raise any errors
+					resolve();
+				});
+			});
+		}
 	}
 
 	protected onInit(): Promise<void> {
@@ -449,7 +469,7 @@ export abstract class ServersBindEndpoint extends BindEndpoint {
 
 /**
  * This endpoint supplies you communication channels for each client connection.
- * Overrride onOpenBinaryChannel and/or onOpenTextChannel to catch neccesary channel
+ * Overrride onOpenBinaryChannel and/or onOpenTextChannel to catch necessary channel
  */
 export class WebSocketChannelSupplyEndpoint extends ServersBindEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
@@ -666,7 +686,7 @@ export namespace WebSocketChannelSupplyEndpoint {
 
 /**
  * This endpoint requests you for communication channels for each client connection.
- * Overrride createBinaryChannel and/or createTextChannel to prodice neccesary channel
+ * Overrride createBinaryChannel and/or createTextChannel to provide necessary channel
  */
 export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
@@ -702,29 +722,18 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 	}
 
 	protected async onDispose() {
+		// Prevent open new connection
+		for (const server of this._servers) {
+			await server.destroyWebSocketServer(this._bindPath);
+		}
+
 		const connections = [...this._connections.values()];
 		this._connections.clear();
 		for (const webSocket of connections) {
 			webSocket.close(1001, "going away");
 			webSocket.terminate();
 		}
-
-		const webSocketServers = this._webSocketServers.splice(0).reverse();
-		for (const webSocketServer of webSocketServers) {
-			await new Promise((resolve) => {
-				webSocketServer.close((err) => {
-					if (err !== undefined) {
-						if (this._log.isWarnEnabled) {
-							this._log.warn(`Web Socket Server was closed with error. Inner message: ${err.message} `);
-						}
-						this._log.trace("Web Socket Server was closed with error.", err);
-					}
-
-					// dispose never raise any errors
-					resolve();
-				});
-			});
-		}
+		this._webSocketServers.splice(0);
 	}
 
 	protected onConnection(webSocket: WebSocket, request: http.IncomingMessage): void {
@@ -766,7 +775,6 @@ export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 		}> = new Map();
 
 		const handler = async (
-			cancellationToken: CancellationToken,
 			event: SubscriberChannel.Event<Uint8Array> | SubscriberChannel.Event<string> | Error
 		) => {
 			if (event instanceof Error) {
@@ -990,7 +998,7 @@ namespace WebSocketChannelSupplyEndpointHelpers {
 			await Promise.all(this._callbacks.map(async (callback) => {
 				try {
 					// Notify that channel brokes
-					await callback(DUMMY_CANCELLATION_TOKEN, error);
+					await callback(error);
 				} catch (e) {
 					// Nothing to do any more with fucking client's callback. Just log STDERR.
 					console.error(e);
@@ -1006,7 +1014,7 @@ namespace WebSocketChannelSupplyEndpointHelpers {
 			const errors: Array<Error> = [];
 			const safePromises = this._callbacks.map(async (callback) => {
 				try {
-					await callback(cancellationToken, { data });
+					await callback({ data/*, cancellationToken*/ });
 				} catch (e) {
 					errors.push(wrapErrorIfNeeded(e));
 				}
@@ -1024,7 +1032,7 @@ namespace WebSocketChannelSupplyEndpointHelpers {
 				await Promise.all(this._callbacks.map(async (callback) => {
 					try {
 						// Notify that channel brokes
-						await callback(DUMMY_CANCELLATION_TOKEN, aggregatedError);
+						await callback(aggregatedError);
 					} catch (e) {
 						// Nothing to do any more with fucking client's callback. Just log STDERR.
 						console.error(e);
