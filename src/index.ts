@@ -466,10 +466,16 @@ export abstract class ServersBindEndpoint extends BindEndpoint {
 	}
 }
 
-
 /**
- * This endpoint supplies you communication channels for each client connection.
- * Overrride onOpenBinaryChannel and/or onOpenTextChannel to catch necessary channel
+ * This endpoint supplies communication channels for each client connection.
+ *
+ * WebSocket Client is hosting the channel:
+ *   - Client's messages delivered via SubscriberChannel
+ *   - To deliver message to client use PublisherChannel
+ *
+ * If you need oposite behavior take a look for `WebSocketChannelFactoryEndpoint`
+ *
+ * You need to override onOpenBinaryChannel and/or onOpenTextChannel to obtain necessary channel
  */
 export class WebSocketChannelSupplyEndpoint extends ServersBindEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
@@ -686,7 +692,14 @@ export namespace WebSocketChannelSupplyEndpoint {
 
 /**
  * This endpoint requests you for communication channels for each client connection.
- * Overrride createBinaryChannel and/or createTextChannel to provide necessary channel
+ *
+ * WebSocket Client is used the channel:
+ *   - Client's messages delivered via PublisherChannel
+ *   - To deliver message to client use SubscriberChannel
+ *
+ * If you need oposite behavior take a look for `WebSocketChannelSupplyEndpoint`
+ *
+ * You need to override createBinaryChannel and/or createTextChannel to provide necessary channel
  */
 export class WebSocketChannelFactoryEndpoint extends ServersBindEndpoint {
 	private readonly _webSocketServers: Array<WebSocket.Server>;
