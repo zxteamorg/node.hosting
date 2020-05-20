@@ -52,7 +52,7 @@ export namespace Configuration {
 	}
 	export type SecuredWebServer = SecuredCommonWebServer | SecuredClientWebServer;
 
-	export const enum ClientCertificateMode {
+	export enum ClientCertificateMode {
 		/**
 		 * The server will NOT request a certificate from clients that connect WILL NOT validate the certificate.
 		 */
