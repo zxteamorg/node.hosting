@@ -15,7 +15,7 @@ if (PACKAGE_GUARD in G) {
 }
 
 import { CancellationToken, Logger, PublisherChannel, SubscriberChannel } from "@zxteam/contract";
-import { ManualCancellationTokenSource, DUMMY_CANCELLATION_TOKEN } from "@zxteam/cancellation";
+import { ManualCancellationTokenSource } from "@zxteam/cancellation";
 import { Initable, Disposable } from "@zxteam/disposable";
 import { InvalidOperationError, wrapErrorIfNeeded, AggregateError } from "@zxteam/errors";
 
@@ -31,8 +31,10 @@ import * as _ from "lodash";
 import { pki } from "node-forge";
 
 import { Configuration } from "./conf";
+import { HttpRequestCancellationToken } from "./HttpRequestCancellationToken";
 
 export * from "./conf";
+export * from "./HttpRequestCancellationToken";
 
 export type WebServerRequestHandler = http.RequestListener;
 
@@ -56,6 +58,10 @@ export abstract class AbstractWebServer<TOpts extends Configuration.WebServerBas
 	private readonly _handlers: Map</*bindPath: */string, WebServerRequestHandler>;
 	private readonly _caCertificates: ReadonlyArray<[pki.Certificate, Buffer]>;
 	private _rootExpressApplication: express.Application | null;
+
+	public static createCancellationToken(request: http.IncomingMessage): CancellationToken {
+		return new HttpRequestCancellationToken(request);
+	}
 
 	public constructor(opts: TOpts, log: Logger) {
 		super();
