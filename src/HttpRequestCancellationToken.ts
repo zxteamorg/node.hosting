@@ -13,8 +13,12 @@ export class HttpRequestCancellationToken implements CancellationToken {
 		this._isCancellationRequested = false;
 		this._onClientDisconnectBound = this._onClientDisconnect.bind(this);
 		this._request = request;
-		this._request.on("close", this._onClientDisconnectBound);
-		this._request.on("end", this._onClientDisconnectBound);
+		// According to https://nodejs.org/api/http.html
+		// v16.0.0	The close event is now emitted when the request has been completed and not when the underlying socket is closed.
+		//
+		// So We switch to listen "close" event on underlaying socket
+		this._request.socket.on("close", this._onClientDisconnectBound);
+		// this._request.on("end", this._onClientDisconnectBound);
 	}
 
 	public get isCancellationRequested(): boolean { return this._isCancellationRequested; }
@@ -37,8 +41,8 @@ export class HttpRequestCancellationToken implements CancellationToken {
 	}
 
 	private _onClientDisconnect() {
-		this._request.removeListener("close", this._onClientDisconnectBound);
-		this._request.removeListener("end", this._onClientDisconnectBound);
+		this._request.socket.removeListener("close", this._onClientDisconnectBound);
+		// this._request.removeListener("end", this._onClientDisconnectBound);
 
 		this._isCancellationRequested = true;
 
