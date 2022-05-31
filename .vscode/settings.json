@@ -2,7 +2,6 @@
 	"editor.detectIndentation": false,
 	"editor.insertSpaces": false,
 	"editor.lineNumbers": "on",
-	"editor.renderIndentGuides": true,
 	"editor.renderWhitespace": "all",
 	"editor.rulers": [
 		80,
@@ -31,5 +30,6 @@
 		"test/**/*.map":true
 	},
 	"git.enabled": true,
-	"git.rebaseWhenSync": true
+	"git.rebaseWhenSync": true,
+	"editor.guides.indentation": true
 }
