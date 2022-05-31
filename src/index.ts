@@ -425,9 +425,9 @@ export class SecuredWebServer extends AbstractWebServer<Configuration.SecuredWeb
 		const address = server.address();
 		if (address !== null) {
 			if (typeof address === "string") {
-				this._log.info("Stoping Web Server http://" + address + "...");
+				this._log.info("Stoping Web Server https://" + address + "...");
 			} else {
-				this._log.info("Stoping " + address.family + " Web Server http://" + address.address + ":" + address.port + "...");
+				this._log.info("Stoping " + address.family + " Web Server https://" + address.address + ":" + address.port + "...");
 			}
 		} else {
 			this._log.info("Stoping Web Server...");
