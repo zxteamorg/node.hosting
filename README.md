@@ -1,3 +1,7 @@
+# DEPRECATED
+Moved to https://github.com/freemework/hosting/tree/src-typescript
+
+
 # ZXTeam's Hosting Items like Web Server (http.Server/https.Server wrapper), WebSocket Server, endpoints, adapters.
 [![npm version badge](https://img.shields.io/npm/v/@zxteam/hosting.svg)](https://www.npmjs.com/package/@zxteam/hosting)
 [![downloads badge](https://img.shields.io/npm/dm/@zxteam/hosting.svg)](https://www.npmjs.org/package/@zxteam/hosting)
